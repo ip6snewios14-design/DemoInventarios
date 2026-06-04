@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>End to End Management - Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { 'navy': '#001f3f', 'navy-light': '#003366', 'navy-dark': '#001a35' }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-50 flex items-center justify-center">
+
+    <div class="bg-white p-8 rounded-xl shadow-xl w-full max-w-md border border-gray-200">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-navy mb-2">End to End Management</h1>
+            <p class="text-gray-600">Sistema de Gestión de Almacén</p>
+        </div>
+
+        <!-- Mensaje de error si las credenciales son incorrectas -->
+        <div th:if="${error}" class="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
+            <i class="fas fa-exclamation-circle mr-2"></i>
+            Credenciales incorrectas. Intenta de nuevo.
+        </div>
+
+        <form action="/login" method="post" class="space-y-6">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Usuario</label>
+                <input type="text" name="username"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy"
+                       placeholder="admin / user" required>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Contraseña</label>
+                <input type="password" name="password"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy"
+                       placeholder="******" required>
+            </div>
+            <button type="submit"
+                    class="w-full bg-navy text-white py-3 rounded-lg font-semibold hover:bg-navy-dark">
+                Iniciar Sesión
+            </button>
+        </form>
+
+        <div class="mt-6 text-center text-sm text-gray-500">
+            <p>Admin: <strong>admin</strong> / <strong>admin123</strong> (acceso total)</p>
+            <p>Empleado: <strong>user</strong> / <strong>user123</strong> (solo reportes)</p>
+        </div>
+    </div>
+
+</body>
+</html>
