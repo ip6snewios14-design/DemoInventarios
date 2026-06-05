@@ -38,6 +38,21 @@ const userProfiles = {
         nombre: 'Carlos López',
         area: 'RH',
         equiposAsignados: ['MON-002']
+    },
+    'marcos': {
+        nombre: 'Marcos Rivera',
+        area: 'TI',
+        equiposAsignados: []
+    },
+    'ana': {
+        nombre: 'Ana Martínez',
+        area: 'Ventas',
+        equiposAsignados: []
+    },
+    'juan': {
+        nombre: 'Juan Pérez',
+        area: 'TI',
+        equiposAsignados: []
     }
 };
 
