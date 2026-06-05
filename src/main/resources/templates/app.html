@@ -579,6 +579,20 @@
                         <i class="fas fa-bell text-gray-600 text-xl hover:text-navy"></i>
                         <span id="notification-count"
                             class="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center notification-badge">0</span>
+
+                        <!-- Dropdown top 4 -->
+                        <div id="notif-dropdown"
+                            class="hidden absolute right-0 top-8 w-80 bg-white rounded-xl shadow-xl border border-gray-200 z-50">
+                            <div class="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
+                                <span class="text-xs font-bold text-navy uppercase tracking-wide">Recientes</span>
+                                <button id="notif-dropdown-ver-todas"
+                                    class="text-xs text-navy hover:underline font-medium">Ver todas</button>
+                            </div>
+                            <div id="notif-dropdown-list" class="divide-y divide-gray-50"></div>
+                            <div class="px-4 py-2 text-center border-t border-gray-100">
+                                <span id="notif-dropdown-count-label" class="text-xs text-gray-400"></span>>
+                            </div>
+                        </div>
                     </div>
                     <div class="text-sm font-medium text-gray-700">
                         <i class="fas fa-user-circle mr-1"></i>
@@ -653,7 +667,7 @@
                             <div class="zone-cnt" id="cnt-loaned">0</div>
                         </div>
                         <div id="zone-loaned"></div>
-                    </div>                    
+                    </div>
                     <div class="zone z-quarantine">
                         <div class="zone-header">
                             <div class="zone-title">
@@ -662,30 +676,6 @@
                             <div class="zone-cnt" id="cnt-reported">0</div>
                         </div>
                         <div id="zone-reported"></div>
-                    </div>
-                    <div class="zone z-field" hidden>
-                        <div class="hidden gap-2 mb-3">
-                            <input type="text" id="qr-input"
-                                class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-navy"
-                                placeholder="ID del equipo (ej: LAP-001)">
-                            <button id="scan-btn" class="px-4 py-2 bg-navy text-white rounded-lg text-sm font-semibold">
-                                <i class="fas fa-qrcode"></i>
-                            </button>
-                            <button id="clear-btn" class="px-3 py-2 bg-gray-100 rounded-lg text-sm">
-                                <i class="fas fa-times"></i>
-                            </button>
-                        </div>
-                        <div id="equipment-info" class="hidden">
-                            <div class="kcard">
-                                <div class="kcard-top">
-                                    <span class="kcard-id" id="equipment-id">-</span>
-                                    <span id="equipment-status" class="px-2 py-1 rounded-full text-xs">-</span>
-                                </div>
-                                <div class="kcard-name" id="equipment-model">-</div>
-                                <div class="kcard-meta">Tipo: <span id="equipment-type">-</span></div>
-                                <div id="equipment-actions" class="mt-3 space-y-2"></div>
-                            </div>
-                        </div>
                     </div>
                 </div>
 
@@ -718,130 +708,507 @@
                 <div class="w-prog" id="wprog"></div>
             </div>
         </div>
-        </section>
 
-        <!-- Monitoreo (solo admin) -->
+        <!-- Inventario (solo admin) -->
         <section id="monitoring-section" class="hidden mb-8">
-            <div class="flex justify-between mb-6">
-                <h2 class="text-xl font-bold text-navy">Monitoreo de Equipos</h2>
-                <button id="refresh-equipment" class="px-4 py-2 bg-gray-100 rounded-lg">
-                    <i class="fas fa-sync-alt mr-2"></i>Actualizar
-                </button>
+
+            <!-- Card escáner QR + controles -->
+            <div class="bg-white rounded-xl shadow p-6 mb-6 border">
+                <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
+                    <h2 class="text-lg font-semibold text-navy">
+                        <i class="fas fa-qrcode mr-2"></i>Escáner QR
+                    </h2>
+                    <div class="flex gap-2 flex-wrap">
+                        <button id="open-alta-btn"
+                            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium text-sm">
+                            <i class="fas fa-plus mr-2"></i>Nuevo Equipo
+                        </button>
+                        <select id="filter-inventory"
+                            class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm">
+                            <option value="todos">Todos los estados</option>
+                            <option value="disponible">Disponible</option>
+                            <option value="asignado">Asignado</option>
+                            <option value="en_mantenimiento">En Mantenimiento</option>
+                            <option value="baja_definitiva">Baja</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="flex flex-col md:flex-row gap-4">
+                    <div class="flex-1">
+                        <input type="text" id="qr-input"
+                            class="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                            placeholder="Ingresa o escanea ID del equipo (ej: LAP-001)">
+                        <p class="text-sm text-gray-500 mt-2">Simula escaneo de código QR</p>
+                    </div>
+                    <div class="flex space-x-3">
+                        <button id="scan-btn"
+                            class="px-6 py-3 bg-navy text-white rounded-lg hover:bg-navy-dark transition">
+                            <i class="fas fa-qrcode mr-2"></i>Buscar
+                        </button>
+                        <button id="clear-btn" class="px-6 py-3 bg-gray-100 rounded-lg hover:bg-gray-200 transition">
+                            <i class="fas fa-times mr-2"></i>Limpiar
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Panel resultado -->
+                <div id="equipment-info" class="mt-6 hidden">
+                    <div class="bg-gray-50 rounded-lg p-5">
+                        <div class="flex justify-between flex-wrap gap-4">
+                            <div>
+                                <h3 class="font-bold text-lg mb-2">Información del Equipo</h3>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <p class="text-sm text-gray-500">ID</p>
+                                        <p id="equipment-id" class="font-medium">-</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm text-gray-500">Tipo</p>
+                                        <p id="equipment-type" class="font-medium">-</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm text-gray-500">Modelo</p>
+                                        <p id="equipment-model" class="font-medium">-</p>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm text-gray-500">Estado</p>
+                                        <span id="equipment-status" class="px-3 py-1 rounded-full text-xs">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="equipment-actions" class="space-y-2 min-w-36"></div>
+                        </div>
+                        <div class="mt-4 pt-4 border-t border-gray-200">
+                            <button id="generate-qr-btn"
+                                class="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm font-semibold hover:bg-black transition flex items-center gap-2">
+                                <i class="fas fa-qrcode"></i> Generar e Imprimir QR
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
+
+            <!-- Tabla inventario -->
             <div class="bg-white rounded-xl shadow overflow-hidden">
                 <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead class="bg-gray-50">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-navy text-white">
                             <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Marca /
-                                    Modelo</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Condición
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ubicación
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acción</th>
+                                <th class="px-4 py-3 font-medium">ID</th>
+                                <th class="px-4 py-3 font-medium">Nombre</th>
+                                <th class="px-4 py-3 font-medium">Marca / Modelo</th>
+                                <th class="px-4 py-3 font-medium">Usuario</th>
+                                <th class="px-4 py-3 font-medium">Célula</th>
+                                <th class="px-4 py-3 font-medium">Estado</th>
+                                <th class="px-4 py-3 font-medium">Último Evento</th>
+                                <th class="px-4 py-3 font-medium">Acción</th>
                             </tr>
                         </thead>
-                        <tbody id="equipment-table-body"></tbody>
+                        <tbody id="inventory-table-body" class="text-sm divide-y divide-gray-200"></tbody>
                     </table>
                 </div>
             </div>
         </section>
 
+        <!-- Modal: Alta de equipo -->
+        <div id="modal-alta"
+            class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+                <h3 class="text-lg font-bold text-navy mb-4"><i class="fas fa-plus-circle mr-2"></i>Nuevo Equipo</h3>
+                <form id="alta-form">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1">ID del Equipo</label>
+                            <input type="text" id="alta-id"
+                                class="w-full px-4 py-2 border rounded-lg bg-gray-100 text-navy font-bold cursor-not-allowed outline-none"
+                                readonly>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Tipo de Dispositivo</label>
+                            <select id="alta-tipo"
+                                class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                                required>
+                                <option value="">-- Selecciona --</option>
+                                <option value="Laptop">💻 Laptop</option>
+                                <option value="Monitor">🖥️ Monitor</option>
+                                <option value="Mouse">🖱️ Mouse</option>
+                                <option value="Teclado">⌨️ Teclado</option>
+                                <option value="CPU">🖥 CPU</option>
+                                <option value="Audífonos">🎧 Audífonos</option>
+                                <option value="Asistente">🔊 Asistente (Alexa/Echo)</option>
+                                <option value="Tablet">📱 Tablet</option>
+                                <option value="Impresora">🖨️ Impresora</option>
+                                <option value="Otro">📦 Otro</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Nombre</label>
+                            <input type="text" id="alta-nombre" placeholder="Ej. ThinkPad T14"
+                                class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                                required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Marca</label>
+                            <input type="text" id="alta-marca" placeholder="Ej. Lenovo"
+                                class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                                required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Modelo</label>
+                            <input type="text" id="alta-modelo"
+                                class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                                required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Número de Serie</label>
+                            <input type="text" id="alta-serie"
+                                class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-navy outline-none">
+                        </div>
+                    </div>
+
+                    <!-- Estrategia -->
+                    <div class="mt-4 bg-gray-50 p-4 border rounded-lg border-navy/20">
+                        <label class="block text-sm font-bold text-navy mb-2">¿Asignar de inmediato?</label>
+                        <select id="alta-estrategia"
+                            class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-navy outline-none mb-3">
+                            <option value="disponible">No, solo dar de alta (Disponible en Almacén)</option>
+                            <option value="asignar">Sí, asignar a un usuario ahora</option>
+                        </select>
+                        <div id="alta-campos-asignacion"
+                            class="hidden grid grid-cols-1 md:grid-cols-2 gap-4 border-t pt-4 border-gray-200">
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Usuario Asignado</label>
+                                <input type="text" id="alta-usuario"
+                                    class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-navy outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Célula / Área</label>
+                                <input type="text" id="alta-celula"
+                                    class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-navy outline-none">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium mb-1">Observaciones</label>
+                        <textarea id="alta-obs" rows="2"
+                            class="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-navy outline-none"></textarea>
+                    </div>
+
+                    <div class="flex justify-end gap-3 mt-6">
+                        <button type="button" onclick="closeAltaModal()"
+                            class="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition">Cancelar</button>
+                        <button type="submit"
+                            class="px-6 py-2 bg-navy text-white rounded-lg hover:bg-navy-dark transition">Guardar
+                            Equipo</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Modal: Registrar evento -->
+        <div id="modal-evento"
+            class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+                <h3 class="text-lg font-bold text-navy mb-1"><i class="fas fa-bolt mr-2"></i>Registrar Evento</h3>
+                <p id="evento-equipo-label" class="text-sm text-gray-500 mb-4"></p>
+                <input type="hidden" id="evento-equipo-id">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tipo de evento</label>
+                        <select id="evento-tipo"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none"></select>
+                    </div>
+                    <div id="evento-usuario-row">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Usuario</label>
+                        <input id="evento-usuario" type="text"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none"
+                            placeholder="Nombre del empleado">
+                    </div>
+                    <div id="evento-area-row">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Célula / Área</label>
+                        <input id="evento-area" type="text"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none"
+                            placeholder="ej: TI, Finanzas, RH">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Fecha</label>
+                        <input id="evento-fecha" type="date"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Notas</label>
+                        <textarea id="evento-notas" rows="2"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none"></textarea>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-6">
+                    <button onclick="closeEventoModal()"
+                        class="px-5 py-2 bg-gray-100 rounded-lg text-sm font-medium hover:bg-gray-200">Cancelar</button>
+                    <button onclick="saveEvento()"
+                        class="px-5 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:bg-navy-dark">Guardar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Préstamos (solo admin) -->
         <!-- Préstamos (solo admin) -->
         <section id="loans-section" class="hidden mb-8">
-            <div class="flex justify-between mb-6">
+
+            <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
                 <h2 class="text-xl font-bold text-navy">Gestión de Préstamos</h2>
-                <button id="new-loan-btn" class="px-4 py-2 bg-navy text-white rounded-lg">
+                <button id="new-loan-btn"
+                    class="px-4 py-2 bg-navy text-white rounded-lg font-medium hover:bg-navy-dark transition">
                     <i class="fas fa-plus mr-2"></i>Nuevo Préstamo
                 </button>
             </div>
-            <div id="new-loan-form" class="bg-white rounded-xl shadow p-6 mb-6 hidden">
-                <h3 class="text-lg font-semibold mb-4">Registrar Nuevo Préstamo</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">ID del Equipo</label><input
-                            type="text" id="loan-equipment-id" class="w-full px-4 py-2 border rounded-lg"></div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Empleado Receptor</label><input
-                            type="text" id="loan-employee" class="w-full px-4 py-2 border rounded-lg"></div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Duración</label>
-                        <div class="flex gap-2">
-                            <input type="number" id="loan-duration-value" class="w-1/2 px-4 py-2 border rounded-lg"
-                                value="1">
-                            <select id="loan-duration-unit" class="w-1/2 px-4 py-2 border rounded-lg">
-                                <option value="dias">Días</option>
-                                <option value="meses">Meses</option>
-                                <option value="años">Años</option>
-                                <option value="indefinido">Indefinido</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Estado al Salir</label><select
-                            id="loan-condition-out" class="w-full px-4 py-2 border rounded-lg">
-                            <option>Excelente</option>
-                            <option>Bueno</option>
-                            <option>Regular</option>
-                        </select></div>
-                    <div class="md:col-span-2"><label
-                            class="block text-sm font-medium text-gray-700 mb-1">Observaciones</label><textarea
-                            id="loan-notes" rows="2" class="w-full px-4 py-2 border rounded-lg"></textarea></div>
+
+            <!-- Escáner QR rápido -->
+            <div class="bg-white rounded-xl shadow p-5 mb-6 border flex flex-col md:flex-row gap-4 items-center">
+                <div class="flex-1">
+                    <p class="text-sm font-semibold text-navy mb-1"><i class="fas fa-qrcode mr-2"></i>Asignación rápida
+                        por QR</p>
+                    <input type="text" id="loan-qr-input"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm"
+                        placeholder="Escanea o ingresa ID del equipo (ej: LAP-001)">
                 </div>
-                <div class="flex justify-end space-x-3 mt-6">
-                    <button id="cancel-loan-btn" class="px-6 py-2 bg-gray-100 rounded-lg">Cancelar</button>
-                    <button id="save-loan-btn" class="px-6 py-2 bg-navy text-white rounded-lg">Registrar
-                        Préstamo</button>
+                <div class="flex gap-2">
+                    <button id="loan-qr-scan-btn"
+                        class="px-5 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:bg-navy-dark">
+                        <i class="fas fa-qrcode mr-2"></i>Buscar
+                    </button>
+                    <button id="loan-qr-clear-btn" class="px-4 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div id="loan-qr-result" class="hidden w-full md:w-auto">
+                    <div class="flex items-center gap-3 bg-gray-50 rounded-lg px-4 py-2 border">
+                        <span class="text-2xl" id="loan-qr-icon">💻</span>
+                        <div>
+                            <p class="font-bold text-navy text-sm" id="loan-qr-id">-</p>
+                            <p class="text-gray-500 text-xs" id="loan-qr-nombre">-</p>
+                        </div>
+                        <span id="loan-qr-status" class="px-2 py-1 rounded-full text-xs font-bold ml-2">-</span>
+                        <button id="loan-qr-assign-btn"
+                            class="ml-3 px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 hidden">
+                            Asignar
+                        </button>
+                        <button id="loan-qr-view-btn"
+                            class="ml-1 px-3 py-1 bg-gray-800 text-white rounded-lg text-xs font-semibold hover:bg-black hidden">
+                            <i class="fas fa-qrcode"></i> QR
+                        </button>
+                    </div>
                 </div>
             </div>
-            <div class="bg-white rounded-xl shadow overflow-hidden">
+
+            <!-- Tabla préstamos activos -->
+            <div class="bg-white rounded-xl shadow overflow-hidden mb-6">
                 <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead class="bg-gray-50">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-navy text-white">
                             <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Equipo</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Empleado
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Responsable
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Condición
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Inicio</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duración
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acción</th>
+                                <th class="px-4 py-3 font-medium">ID</th>
+                                <th class="px-4 py-3 font-medium">Equipo</th>
+                                <th class="px-4 py-3 font-medium">Tipo</th>
+                                <th class="px-4 py-3 font-medium">Empleado</th>
+                                <th class="px-4 py-3 font-medium">Área</th>
+                                <th class="px-4 py-3 font-medium">Condición</th>
+                                <th class="px-4 py-3 font-medium">Inicio</th>
+                                <th class="px-4 py-3 font-medium">Duración</th>
+                                <th class="px-4 py-3 font-medium">Estado</th>
+                                <th class="px-4 py-3 font-medium">Acciones</th>
                             </tr>
                         </thead>
-                        <tbody id="loans-table-body"></tbody>
+                        <tbody id="loans-table-body" class="text-sm divide-y divide-gray-200"></tbody>
                     </table>
                 </div>
             </div>
+
         </section>
+
+        <!-- Modal Nuevo Préstamo -->
+        <div id="modal-loan"
+            class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6">
+
+                <!-- Header modal -->
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h3 class="text-lg font-bold text-navy"><i class="fas fa-exchange-alt mr-2"></i>Nuevo Préstamo
+                        </h3>
+                        <p class="text-sm text-gray-500 mt-1">Selecciona el equipo y asigna al empleado</p>
+                    </div>
+                    <!-- Pasos -->
+                    <div class="flex items-center gap-2 text-xs font-semibold">
+                        <div id="step-1-indicator"
+                            class="w-7 h-7 rounded-full bg-navy text-white flex items-center justify-center">1</div>
+                        <div class="w-8 h-px bg-gray-300"></div>
+                        <div id="step-2-indicator"
+                            class="w-7 h-7 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center">2
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PASO 1: Seleccionar equipo -->
+                <div id="loan-step-1">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Tipo de dispositivo</label>
+                        <div class="flex gap-2 flex-wrap">
+                            <button data-tipo="" onclick="filtrarDisponibles(this)"
+                                class="tipo-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-navy text-white border-navy">
+                                Todos
+                            </button>
+                            <button data-tipo="Laptop" onclick="filtrarDisponibles(this)"
+                                class="tipo-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-white text-gray-600 border-gray-300 hover:border-navy">
+                                💻 Laptop
+                            </button>
+                            <button data-tipo="Monitor" onclick="filtrarDisponibles(this)"
+                                class="tipo-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-white text-gray-600 border-gray-300 hover:border-navy">
+                                🖥️ Monitor
+                            </button>
+                            <button data-tipo="Mouse" onclick="filtrarDisponibles(this)"
+                                class="tipo-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-white text-gray-600 border-gray-300 hover:border-navy">
+                                🖱️ Mouse
+                            </button>
+                            <button data-tipo="Teclado" onclick="filtrarDisponibles(this)"
+                                class="tipo-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-white text-gray-600 border-gray-300 hover:border-navy">
+                                ⌨️ Teclado
+                            </button>
+                            <button data-tipo="Audífonos" onclick="filtrarDisponibles(this)"
+                                class="tipo-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-white text-gray-600 border-gray-300 hover:border-navy">
+                                🎧 Audífonos
+                            </button>
+                            <button data-tipo="Asistente" onclick="filtrarDisponibles(this)"
+                                class="tipo-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-white text-gray-600 border-gray-300 hover:border-navy">
+                                🔊 Asistente
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Cards equipos disponibles -->
+                    <div id="loan-equipos-grid"
+                        class="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-64 overflow-y-auto py-1"></div>
+
+                    <p id="loan-no-disponibles" class="hidden text-center text-gray-400 py-8 text-sm">
+                        No hay equipos disponibles de este tipo
+                    </p>
+
+                    <div class="flex justify-end mt-6">
+                        <button onclick="closeLoanModal()"
+                            class="px-5 py-2 bg-gray-100 rounded-lg text-sm font-medium hover:bg-gray-200 mr-2">Cancelar</button>
+                        <button id="loan-next-btn" onclick="loanGoStep2()" disabled
+                            class="px-5 py-2 bg-navy text-white rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+                            Siguiente <i class="fas fa-arrow-right ml-1"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- PASO 2: Datos del empleado -->
+                <div id="loan-step-2" class="hidden">
+
+                    <!-- Equipo seleccionado -->
+                    <div class="bg-gray-50 rounded-lg p-4 mb-5 flex items-center gap-4 border border-gray-200">
+                        <div class="w-10 h-10 bg-navy rounded-lg flex items-center justify-center text-white text-lg"
+                            id="loan-eq-icon">💻</div>
+                        <div>
+                            <p class="font-bold text-navy text-sm" id="loan-eq-id-label">-</p>
+                            <p class="text-gray-500 text-xs" id="loan-eq-nombre-label">-</p>
+                        </div>
+                        <button onclick="loanGoStep1()" class="ml-auto text-xs text-gray-400 hover:text-navy">
+                            <i class="fas fa-pen"></i> Cambiar
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Empleado Receptor</label>
+                            <input type="text" id="loan-employee"
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                                placeholder="Nombre completo">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Célula / Área</label>
+                            <input type="text" id="loan-area"
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                                placeholder="ej: TI, Finanzas, RH">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Duración</label>
+                            <div class="flex gap-2">
+                                <input type="number" id="loan-duration-value"
+                                    class="w-1/2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                                    value="1" min="1">
+                                <select id="loan-duration-unit"
+                                    class="w-1/2 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none">
+                                    <option value="dias">Días</option>
+                                    <option value="meses">Meses</option>
+                                    <option value="años">Años</option>
+                                    <option value="indefinido">Indefinido</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Condición al salir</label>
+                            <select id="loan-condition-out"
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none">
+                                <option>Excelente</option>
+                                <option>Bueno</option>
+                                <option>Regular</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
+                            <textarea id="loan-notes" rows="2"
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end gap-3 mt-6">
+                        <button onclick="closeLoanModal()"
+                            class="px-5 py-2 bg-gray-100 rounded-lg text-sm font-medium hover:bg-gray-200">Cancelar</button>
+                        <button onclick="saveLoan()"
+                            class="px-5 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:bg-navy-dark">
+                            <i class="fas fa-check mr-1"></i>Registrar Préstamo
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
 
         <!-- Historial (solo admin) -->
         <section id="history-section" class="hidden mb-8">
-            <h2 class="text-xl font-bold text-navy mb-6">Historial de Transacciones</h2>
+            <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
+                <h2 class="text-xl font-bold text-navy">Historial de Transacciones</h2>
+                <div class="flex gap-2 flex-wrap">
+                    <input type="text" id="search-history" placeholder="Buscar equipo o empleado..."
+                        class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm">
+                    <select id="filter-history"
+                        class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm">
+                        <option value="todos">Todos los tipos</option>
+                        <option value="Préstamo">Préstamos</option>
+                        <option value="Devolución">Devoluciones</option>
+                        <option value="Reporte">Reportes</option>
+                    </select>
+                </div>
+            </div>
             <div class="bg-white rounded-xl shadow overflow-hidden">
                 <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead class="bg-gray-50">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-navy text-white">
                             <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Equipo</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Empleado
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Responsable
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Detalles
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fecha</th>
+                                <th class="px-4 py-3 font-medium">ID</th>
+                                <th class="px-4 py-3 font-medium">Tipo</th>
+                                <th class="px-4 py-3 font-medium">Equipo</th>
+                                <th class="px-4 py-3 font-medium">Empleado</th>
+                                <th class="px-4 py-3 font-medium">Responsable</th>
+                                <th class="px-4 py-3 font-medium">Detalles</th>
+                                <th class="px-4 py-3 font-medium">Fecha</th>
+                                <th class="px-4 py-3 font-medium">QR</th>
                             </tr>
                         </thead>
-                        <tbody id="history-table-body"></tbody>
+                        <tbody id="history-table-body" class="text-sm divide-y divide-gray-200"></tbody>
                     </table>
                 </div>
             </div>
@@ -849,108 +1216,291 @@
 
         <!-- Reportes -->
         <section id="reports-section" class="hidden mb-8">
-            <div class="flex justify-between mb-6">
+            <div class="flex justify-between items-center mb-6 flex-wrap gap-4">
                 <h2 class="text-xl font-bold text-navy">Reportes de Incidencias</h2>
-                <button id="new-report-btn" class="px-4 py-2 bg-red-600 text-white rounded-lg">
-                    <i class="fas fa-exclamation-triangle mr-2"></i>Nuevo Reporte
-                </button>
+                <div class="flex gap-2 flex-wrap">
+                    <input type="text" id="search-reports" placeholder="Buscar equipo o reportador..."
+                        class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm">
+                    <select id="filter-reports"
+                        class="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none text-sm">
+                        <option value="todos">Todos</option>
+                        <option value="Pendiente">Pendientes</option>
+                        <option value="Resuelto">Resueltos</option>
+                    </select>
+                    <button id="new-report-btn"
+                        class="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>Nuevo Reporte
+                    </button>
+                </div>
             </div>
-            <div id="new-report-form" class="bg-white rounded-xl shadow p-6 mb-6 hidden">
-                <h3 class="text-lg font-semibold mb-4">Registrar Nueva Incidencia</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">ID del Equipo</label><input
-                            type="text" id="report-equipment-id" class="w-full px-4 py-2 border rounded-lg"></div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Tipo de Incidencia</label><select
-                            id="report-type" class="w-full px-4 py-2 border rounded-lg">
-                            <option>Equipo Fallado</option>
-                            <option>Problema con Paquetería</option>
-                            <option>Daño Físico</option>
-                            <option>Pérdida</option>
-                            <option>Otro</option>
-                        </select></div>
-                    <div class="md:col-span-2"><label
-                            class="block text-sm font-medium text-gray-700 mb-1">Descripción</label><textarea
-                            id="report-description" rows="3" class="w-full px-4 py-2 border rounded-lg"></textarea>
+            <!-- Escáner QR + buscador integrado -->
+            <div class="bg-white rounded-xl shadow p-5 mb-6 border">
+                <div class="flex flex-col md:flex-row gap-3 items-start md:items-center">
+                    <div class="flex-1">
+                        <p class="text-sm font-semibold text-red-600 mb-2"><i class="fas fa-qrcode mr-2"></i>Reporte
+                            rápido por QR</p>
+                        <div class="flex gap-2">
+                            <input type="text" id="report-qr-input"
+                                class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-400 outline-none text-sm"
+                                placeholder="Escanea o ingresa ID del equipo (ej: LAP-001)">
+                            <button id="report-qr-scan-btn"
+                                class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700">
+                                <i class="fas fa-qrcode mr-1"></i>Buscar
+                            </button>
+                            <button id="report-qr-clear-btn"
+                                class="px-3 py-2 bg-gray-100 rounded-lg text-sm hover:bg-gray-200">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
                     </div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Reportado por</label><input
-                            type="text" id="report-reporter" class="w-full px-4 py-2 border rounded-lg"></div>
-                    <div><label class="block text-sm font-medium text-gray-700 mb-1">Prioridad</label><select
-                            id="report-priority" class="w-full px-4 py-2 border rounded-lg">
-                            <option>Alta</option>
-                            <option>Media</option>
-                            <option>Baja</option>
-                        </select></div>
-                </div>
-                <div class="flex justify-end space-x-3 mt-6">
-                    <button id="cancel-report-btn" class="px-6 py-2 bg-gray-100 rounded-lg">Cancelar</button>
-                    <button id="save-report-btn" class="px-6 py-2 bg-red-600 text-white rounded-lg">Registrar
-                        Reporte</button>
+                    <div id="report-qr-result" class="hidden w-full md:w-auto">
+                        <div class="flex items-center gap-3 bg-gray-50 rounded-lg px-4 py-2 border mt-2 md:mt-6">
+                            <span class="text-2xl" id="report-qr-icon">💻</span>
+                            <div>
+                                <p class="font-bold text-navy text-sm" id="report-qr-id">-</p>
+                                <p class="text-gray-500 text-xs" id="report-qr-nombre">-</p>
+                            </div>
+                            <span id="report-qr-status" class="px-2 py-1 rounded-full text-xs font-bold ml-2">-</span>
+                            <button id="report-qr-new-btn"
+                                class="ml-3 px-3 py-1 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">
+                                Reportar
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
+
             <div class="bg-white rounded-xl shadow overflow-hidden">
                 <div class="overflow-x-auto">
-                    <table class="w-full">
-                        <thead class="bg-gray-50">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-navy text-white">
                             <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Equipo</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Descripción
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reportado
-                                    por</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prioridad
-                                </th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Acción</th>
+                                <th class="px-4 py-3 font-medium">ID</th>
+                                <th class="px-4 py-3 font-medium">Equipo</th>
+                                <th class="px-4 py-3 font-medium">Tipo</th>
+                                <th class="px-4 py-3 font-medium">Descripción</th>
+                                <th class="px-4 py-3 font-medium">Reportado por</th>
+                                <th class="px-4 py-3 font-medium">Prioridad</th>
+                                <th class="px-4 py-3 font-medium">Estado</th>
+                                <th class="px-4 py-3 font-medium">Acciones</th>
                             </tr>
                         </thead>
-                        <tbody id="reports-table-body"></tbody>
+                        <tbody id="reports-table-body" class="text-sm divide-y divide-gray-200"></tbody>
                     </table>
                 </div>
             </div>
         </section>
 
-        <!-- Notificaciones -->
+        <!-- Modal Nuevo Reporte -->
+        <div id="modal-report"
+            class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-6">
+                <h3 class="text-lg font-bold text-navy mb-4">
+                    <i class="fas fa-exclamation-triangle mr-2 text-red-500"></i>Nueva Incidencia
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="relative">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">ID del Equipo</label>
+                        <input type="text" id="report-equipment-id"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                            placeholder="Escribe para buscar..." autocomplete="off">
+                        <!-- Dropdown sugerencias -->
+                        <div id="report-eq-dropdown"
+                            class="hidden absolute z-10 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-48 overflow-y-auto">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Tipo de Incidencia</label>
+                        <select id="report-type"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none">
+                            <option>Equipo Fallado</option>
+                            <option>Problema con Paquetería</option>
+                            <option>Daño Físico</option>
+                            <option>Pérdida</option>
+                            <option>Otro</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Reportado por</label>
+                        <input type="text" id="report-reporter"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                            placeholder="Nombre completo">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Prioridad</label>
+                        <select id="report-priority"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none">
+                            <option>Alta</option>
+                            <option>Media</option>
+                            <option>Baja</option>
+                        </select>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+                        <textarea id="report-description" rows="3"
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-navy outline-none"
+                            placeholder="Describe el problema..."></textarea>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3 mt-6">
+                    <button onclick="closeReportModal()"
+                        class="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition text-sm font-medium">Cancelar</button>
+                    <button onclick="saveReport()"
+                        class="px-5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition text-sm font-semibold">
+                        <i class="fas fa-save mr-1"></i>Registrar Reporte
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Confirmar Resolver -->
+        <div id="modal-resolve"
+            class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 text-center">
+                <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-check text-green-600 text-2xl"></i>
+                </div>
+                <h3 class="text-lg font-bold text-navy mb-2">¿Marcar como resuelto?</h3>
+                <p class="text-gray-500 text-sm mb-1" id="resolve-eq-label">-</p>
+                <p class="text-gray-400 text-xs mb-6" id="resolve-desc-label">-</p>
+                <div class="flex gap-3 justify-center">
+                    <button onclick="closeResolveModal()"
+                        class="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium">Cancelar</button>
+                    <button onclick="confirmResolve()"
+                        class="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold">
+                        Sí, resolver
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <section id="alexa-section" class="hidden">
             <div class="flex justify-between items-center mb-6">
                 <h2 class="text-xl font-bold text-navy">Panel de Notificaciones</h2>
             </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                <!-- Lista -->
                 <div class="lg:col-span-2">
                     <div class="bg-white rounded-xl shadow p-6">
-                        <h3 class="text-lg font-semibold text-navy mb-4">Notificaciones</h3>
+
+                        <!-- Filtros rápidos -->
+                        <div class="flex gap-2 flex-wrap mb-4">
+                            <button data-filter="todos"
+                                class="notif-filter-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-navy text-white border-navy">
+                                Todos
+                            </button>
+                            <button data-filter="Préstamo"
+                                class="notif-filter-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-white text-gray-600 border-gray-300 hover:border-navy">
+                                <i class="fas fa-exchange-alt mr-1"></i>Préstamos
+                            </button>
+                            <button data-filter="Devolución"
+                                class="notif-filter-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-white text-gray-600 border-gray-300 hover:border-navy">
+                                <i class="fas fa-undo mr-1"></i>Devoluciones
+                            </button>
+                            <button data-filter="Reporte"
+                                class="notif-filter-btn px-3 py-1.5 rounded-lg border text-sm font-medium bg-white text-gray-600 border-gray-300 hover:border-navy">
+                                <i class="fas fa-exclamation-triangle mr-1"></i>Reportes
+                            </button>
+                        </div>
+
                         <div id="speech-messages" class="space-y-3 max-h-96 overflow-y-auto"></div>
                     </div>
                 </div>
+
+                <!-- Estadísticas -->
                 <div class="bg-white rounded-xl shadow p-6">
                     <h3 class="text-lg font-semibold text-navy mb-4">Estadísticas</h3>
-                    <div class="space-y-4">
-                        <div>
-                            <p class="text-sm text-gray-500">Total</p>
-                            <p id="total-notifications" class="text-2xl font-bold text-navy">0</p>
-                        </div>
-                        <div>
-                            <p class="text-sm text-gray-500">Préstamos</p>
-                            <p id="loan-notifications" class="text-xl font-semibold text-amber-600">0</p>
-                        </div>
-                        <div>
-                            <p class="text-sm text-gray-500">Devoluciones</p>
-                            <p id="return-notifications" class="text-xl font-semibold text-green-600">0</p>
-                        </div>
-                        <div>
-                            <p class="text-sm text-gray-500">Reportes</p>
-                            <p id="report-notifications" class="text-xl font-semibold text-red-600">0</p>
-                        </div>
+                    <div class="space-y-3">
+                        <button data-filter="todos"
+                            class="notif-filter-btn w-full flex justify-between items-center px-4 py-3 rounded-lg bg-gray-50 hover:bg-gray-100 border border-gray-200 transition">
+                            <span class="text-sm text-gray-500">Total</span>
+                            <span id="total-notifications" class="text-xl font-bold text-navy">0</span>
+                        </button>
+                        <button data-filter="Préstamo"
+                            class="notif-filter-btn w-full flex justify-between items-center px-4 py-3 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 transition">
+                            <span class="text-sm text-amber-700">Préstamos</span>
+                            <span id="loan-notifications" class="text-xl font-semibold text-amber-600">0</span>
+                        </button>
+                        <button data-filter="Devolución"
+                            class="notif-filter-btn w-full flex justify-between items-center px-4 py-3 rounded-lg bg-green-50 hover:bg-green-100 border border-green-200 transition">
+                            <span class="text-sm text-green-700">Devoluciones</span>
+                            <span id="return-notifications" class="text-xl font-semibold text-green-600">0</span>
+                        </button>
+                        <button data-filter="Reporte"
+                            class="notif-filter-btn w-full flex justify-between items-center px-4 py-3 rounded-lg bg-red-50 hover:bg-red-100 border border-red-200 transition">
+                            <span class="text-sm text-red-700">Reportes</span>
+                            <span id="report-notifications" class="text-xl font-semibold text-red-600">0</span>
+                        </button>
                     </div>
                     <div class="mt-6 pt-6 border-t">
-                        <button id="clear-notifications-btn" class="w-full px-4 py-2 bg-gray-100 rounded-lg">
+                        <button id="clear-notifications-btn"
+                            class="w-full px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition text-sm font-medium">
                             <i class="fas fa-trash-alt mr-2"></i>Limpiar Historial
                         </button>
                     </div>
                 </div>
+
             </div>
         </section>
 
+        <!-- Modal QR -->
+        <div id="modal-qr"
+            class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-8 text-center">
+
+                <!-- Animación de generación -->
+                <div id="qr-generating" class="">
+                    <div
+                        class="w-24 h-24 mx-auto mb-4 rounded-xl bg-navy flex items-center justify-center animate-pulse">
+                        <i class="fas fa-qrcode text-white text-4xl"></i>
+                    </div>
+                    <p class="text-navy font-bold text-lg">Generando QR...</p>
+                    <p class="text-gray-500 text-sm mt-1" id="qr-gen-label">Preparando código</p>
+                    <div class="h-1 bg-gray-200 rounded-full mt-4 overflow-hidden">
+                        <div id="qr-progress" class="h-full bg-navy rounded-full w-0 transition-all duration-1000">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- QR listo -->
+                <div id="qr-ready" class="hidden">
+                    <div class="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                        <i class="fas fa-check text-white text-xs"></i>
+                    </div>
+                    <p class="text-green-600 font-bold text-sm mb-4">¡QR listo para imprimir!</p>
+
+                    <!-- Canvas donde se dibuja el QR -->
+                    <div class="border-2 border-navy rounded-xl p-4 mb-4 inline-block">
+                        <canvas id="qr-canvas" width="160" height="160"></canvas>
+                    </div>
+
+                    <p class="text-navy font-bold text-lg" id="qr-equipo-id">-</p>
+                    <p class="text-gray-500 text-sm" id="qr-equipo-nombre">-</p>
+
+                    <div class="flex gap-2 mt-5">
+                        <button onclick="closeQrModal()"
+                            class="flex-1 px-4 py-2 bg-gray-100 rounded-lg text-sm font-medium hover:bg-gray-200">Cerrar</button>
+                        <button onclick="printQr()"
+                            class="flex-1 px-4 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:bg-navy-dark">
+                            <i class="fas fa-print mr-1"></i>Imprimir
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Card éxito préstamo -->
+        <div class="wcard" id="loan-success-card">
+            <div style="font-size:2.5rem;margin-bottom:12px">✅</div>
+            <div class="w-title" id="loan-success-title">Préstamo Registrado</div>
+            <div class="w-sub" id="loan-success-sub">-</div>
+            <div class="w-bar">
+                <div class="w-prog" id="loan-success-prog"></div>
+            </div>
+        </div>
     </main>
 
     <!-- Footer -->
@@ -971,8 +1521,9 @@
         </div>
     </footer>
 
-    <!-- JS al final, después del HTML -->
-    <script th:src="@{/js/app.js}"></script>
+    <script th:src="@{/js/db.js}"></script>
+    <script th:src="@{/js/inventory.js}"></script>
+    <script th:src="@{/js/app.js}"></script> <!-- JS al final, después del HTML -->
 </body>
 
 </html>

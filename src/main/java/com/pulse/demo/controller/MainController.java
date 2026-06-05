@@ -12,7 +12,6 @@ public class MainController {
 
     @GetMapping("/")
     public String index(HttpSession session) {
-        // Si ya hay sesión activa, manda directo a la app
         if (session.getAttribute("role") != null) {
             return "redirect:/app";
         }
@@ -24,14 +23,14 @@ public class MainController {
         if (session.getAttribute("role") != null) {
             return "redirect:/app";
         }
-        return "login"; // → templates/login.html
+        return "login";
     }
 
     @PostMapping("/login")
     public String loginSubmit(@RequestParam String username,
-                              @RequestParam String password,
-                              HttpSession session,
-                              Model model) {
+            @RequestParam String password,
+            HttpSession session,
+            Model model) {
 
         if (username.equals("admin") && password.equals("admin123")) {
             session.setAttribute("role", "admin");
@@ -45,23 +44,24 @@ public class MainController {
 
         } else {
             model.addAttribute("error", true);
-            return "login"; // regresa al login con el mensaje de error
+            return "login";
         }
     }
 
     @GetMapping("/app")
     public String appPage(HttpSession session, Model model) {
         String role = (String) session.getAttribute("role");
+        String username = (String) session.getAttribute("username");
 
-        // Si no hay sesión, manda al login
         if (role == null) {
             return "redirect:/login";
         }
 
-        // Inyecta el rol en el modelo para que Thymeleaf lo use en el HTML
         model.addAttribute("role", role);
-        model.addAttribute("username", session.getAttribute("username"));
-        return "app"; // → templates/app.html
+        model.addAttribute("username", username);
+
+        // Admin va a app.html, empleado a user.html
+        return role.equals("admin") ? "app" : "user";
     }
 
     @GetMapping("/logout")

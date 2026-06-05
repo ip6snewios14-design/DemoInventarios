@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>End to End Management - Mi Equipo</title>
+
+    <meta id="app-role" name="app-role" th:content="${role}">
+    <meta id="app-username" name="app-username" th:content="${username}">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { 'navy': '#001f3f', 'navy-light': '#003366', 'navy-dark': '#001a35' } } }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        :root {
+            --green: #10B981;
+            --amber: #F59E0B;
+            --red: #EF4444;
+            --border: #E2E8F0;
+            --bg3: #F8FAFC;
+            --muted: #64748B;
+        }
+
+        .tab-btn {
+            transition: all .2s;
+        }
+
+        .tab-btn.active {
+            border-bottom: 3px solid #001f3f;
+            color: #001f3f;
+            font-weight: 600;
+        }
+
+        /* Setup cards */
+        .device-card {
+            background: #fff;
+            border: 1.5px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            transition: all .25s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .device-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+        }
+
+        .device-card.ok::before {
+            background: var(--green);
+        }
+
+        .device-card.warn::before {
+            background: var(--amber);
+        }
+
+        .device-card.maint::before {
+            background: var(--red);
+        }
+
+        .device-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 24px rgba(0, 31, 63, .08);
+        }
+
+        .device-icon {
+            font-size: 3rem;
+        }
+
+        .device-id {
+            font-size: 11px;
+            font-weight: 700;
+            color: #1E3A8A;
+            letter-spacing: .5px;
+        }
+
+        .device-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #0F172A;
+            text-align: center;
+        }
+
+        .device-model {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .device-status {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 20px;
+            letter-spacing: .5px;
+        }
+
+        /* Timeline */
+        .timeline {
+            position: relative;
+            padding-left: 28px;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 6px;
+            bottom: 6px;
+            width: 2px;
+            background: var(--border);
+        }
+
+        .tl-item {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .tl-dot {
+            position: absolute;
+            left: -24px;
+            top: 4px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            box-shadow: 0 0 0 2px var(--border);
+        }
+
+        .tl-dot.green {
+            background: var(--green);
+            box-shadow: 0 0 0 2px var(--green);
+        }
+
+        .tl-dot.amber {
+            background: var(--amber);
+            box-shadow: 0 0 0 2px var(--amber);
+        }
+
+        .tl-dot.red {
+            background: var(--red);
+            box-shadow: 0 0 0 2px var(--red);
+        }
+
+        .tl-dot.blue {
+            background: #3B82F6;
+            box-shadow: 0 0 0 2px #3B82F6;
+        }
+
+        /* Mensaje simulado */
+        .msg-bubble {
+            background: #F0F9FF;
+            border-radius: 12px 12px 12px 2px;
+            padding: 10px 14px;
+            font-size: 12px;
+            color: #334155;
+            max-width: 80%;
+            line-height: 1.5;
+        }
+
+        .msg-bubble.sent {
+            background: #001f3f;
+            color: #fff;
+            border-radius: 12px 12px 2px 12px;
+            margin-left: auto;
+        }
+
+        /* Welcome card */
+        .wcard {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(.9);
+            background: #fff;
+            border: 1px solid #CBD5E1;
+            border-radius: 16px;
+            padding: 32px 40px;
+            text-align: center;
+            z-index: 800;
+            opacity: 0;
+            pointer-events: none;
+            transition: all .45s;
+            box-shadow: 0 25px 50px -12px rgba(10, 37, 64, .25);
+        }
+
+        .wcard.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        .w-bar {
+            height: 4px;
+            background: #F1F5F9;
+            border-radius: 2px;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+
+        .w-prog {
+            height: 100%;
+            background: #1E3A8A;
+            border-radius: 2px;
+            width: 0;
+            transition: width 2s ease;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen bg-gray-50">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200">
+        <div class="container mx-auto px-4">
+            <div class="flex justify-between items-center py-4 flex-wrap gap-4">
+                <div class="flex items-center space-x-3">
+                    <div
+                        class="w-12 h-12 rounded-lg overflow-hidden bg-white border border-gray-200 flex items-center justify-center">
+                        <img src="https://media.licdn.com/dms/image/v2/D560BAQE61e5p7NPjtg/company-logo_200_200/company-logo_200_200/0/1684554691765/end_to_end_management_logo?e=2147483647&v=beta&t=ZcnsbZ2jv-5udc8TY2C8NHg-Z7Ps40Nl5MW4SmM6gSU"
+                            alt="Logo" class="w-full h-full object-cover">
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-navy">End to End Management</h1>
+                        <p class="text-sm text-gray-500">Portal del Empleado</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="text-right">
+                        <p class="text-sm font-semibold text-navy" id="user-display-name">-</p>
+                        <p class="text-xs text-gray-400" id="user-display-area">-</p>
+                    </div>
+                    <div class="w-9 h-9 rounded-full bg-navy flex items-center justify-center text-white font-bold text-sm"
+                        id="user-avatar">?</div>
+                    <a href="/logout" class="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">
+                        <i class="fas fa-sign-out-alt mr-1"></i>Salir
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Tabs -->
+    <nav class="bg-white border-b border-gray-200">
+        <div class="container mx-auto px-4">
+            <div class="flex gap-0">
+                <button data-tab="setup" class="tab-btn active px-6 py-4 text-sm text-gray-600 border-b-3">
+                    <i class="fas fa-desktop mr-2"></i>Mi Setup
+                </button>
+                <button data-tab="historial" class="tab-btn px-6 py-4 text-sm text-gray-600">
+                    <i class="fas fa-history mr-2"></i>Historial & Reportes
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container mx-auto px-4 py-6">
+
+        <!-- TAB: MI SETUP -->
+        <div id="tab-setup">
+
+            <!-- Banner bienvenida -->
+            <div class="bg-navy rounded-2xl p-6 mb-6 text-white flex items-center justify-between flex-wrap gap-4">
+                <div>
+                    <p class="text-blue-200 text-sm font-medium mb-1">Bienvenido de vuelta</p>
+                    <h2 class="text-2xl font-bold" id="banner-name">-</h2>
+                    <p class="text-blue-300 text-sm mt-1"><i class="fas fa-building mr-1"></i><span
+                            id="banner-area">-</span></p>
+                </div>
+                <div class="text-right">
+                    <p class="text-blue-200 text-xs mb-1">Equipos asignados</p>
+                    <p class="text-4xl font-black" id="banner-count">0</p>
+                </div>
+            </div>
+
+            <!-- Grid de dispositivos -->
+            <div id="setup-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6"></div>
+
+            <!-- Estado vacío -->
+            <div id="setup-empty" class="hidden text-center py-16 text-gray-400">
+                <i class="fas fa-inbox text-4xl mb-3 block"></i>
+                <p class="font-medium">Sin equipos asignados</p>
+                <p class="text-sm mt-1">Contacta a tu administrador</p>
+            </div>
+
+        </div>
+
+        <!-- TAB: HISTORIAL & REPORTES -->
+        <div id="tab-historial" class="hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- Timeline historial -->
+                <div class="bg-white rounded-xl shadow p-6 border">
+                    <h3 class="text-sm font-bold text-navy uppercase tracking-wide mb-5">
+                        <i class="fas fa-history mr-2"></i>Historial de mis equipos
+                    </h3>
+                    <div id="user-timeline" class="timeline"></div>
+                </div>
+
+                <!-- Panel derecho: reporte + mensajes -->
+                <div class="flex flex-col gap-4">
+
+                    <!-- Nuevo reporte -->
+                    <div class="bg-white rounded-xl shadow p-6 border">
+                        <h3 class="text-sm font-bold text-red-600 uppercase tracking-wide mb-4">
+                            <i class="fas fa-exclamation-triangle mr-2"></i>Reportar incidencia
+                        </h3>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Equipo</label>
+                                <select id="user-report-equipo"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none">
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Tipo de problema</label>
+                                <select id="user-report-tipo"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none">
+                                    <option>Equipo Fallado</option>
+                                    <option>Daño Físico</option>
+                                    <option>Problema con Paquetería</option>
+                                    <option>Pérdida</option>
+                                    <option>Otro</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Prioridad</label>
+                                <select id="user-report-prioridad"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none">
+                                    <option value="Alta">🔴 Alta</option>
+                                    <option value="Media" selected>🟡 Media</option>
+                                    <option value="Baja">🟢 Baja</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Descripción</label>
+                                <textarea id="user-report-desc" rows="3"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none resize-none"
+                                    placeholder="Describe el problema con detalle..."></textarea>
+                            </div>
+                            <button onclick="submitUserReport()"
+                                class="w-full py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 transition">
+                                <i class="fas fa-paper-plane mr-2"></i>Enviar Reporte
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Chat simulado con soporte -->
+                    <div class="bg-white rounded-xl shadow p-6 border flex flex-col" style="min-height:280px">
+                        <h3 class="text-sm font-bold text-navy uppercase tracking-wide mb-4">
+                            <i class="fas fa-comments mr-2"></i>Soporte técnico
+                            <span
+                                class="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full font-normal">En
+                                línea</span>
+                        </h3>
+                        <div id="chat-messages" class="flex-1 space-y-3 overflow-y-auto max-h-40 mb-3"></div>
+                        <div class="flex gap-2">
+                            <input type="text" id="chat-input"
+                                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-navy outline-none"
+                                placeholder="Escribe un mensaje...">
+                            <button onclick="sendChatMessage()"
+                                class="px-4 py-2 bg-navy text-white rounded-lg text-sm hover:bg-navy-dark">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Tabla de reportes previos -->
+                    <div class="bg-white rounded-xl shadow p-6 border">
+                        <h3 class="text-sm font-bold text-navy uppercase tracking-wide mb-4">
+                            <i class="fas fa-list mr-2"></i>Mis reportes
+                        </h3>
+                        <div id="user-reports-table" class="space-y-2"></div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+        <!-- Modal: Reportar problema -->
+        <div id="modal-reportar"
+            class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+                <h3 class="text-base font-bold text-red-600 mb-1">
+                    <i class="fas fa-exclamation-triangle mr-2"></i>Reportar problema
+                </h3>
+                <p class="text-sm text-gray-500 mb-4" id="modal-reportar-titulo">-</p>
+                <input type="hidden" id="modal-reportar-eqid">
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Tipo de problema</label>
+                        <select id="modal-reportar-tipo"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-red-400">
+                            <option>Equipo Fallado</option>
+                            <option>Daño Físico</option>
+                            <option>Problema con Paquetería</option>
+                            <option>Pérdida</option>
+                            <option>Otro</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Prioridad</label>
+                        <select id="modal-reportar-prio"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-red-400">
+                            <option value="Alta">🔴 Alta</option>
+                            <option value="Media" selected>🟡 Media</option>
+                            <option value="Baja">🟢 Baja</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Descripción del problema</label>
+                        <textarea id="modal-reportar-desc" rows="3"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-red-400 resize-none"
+                            placeholder="Describe qué está fallando..."></textarea>
+                    </div>
+                </div>
+                <div class="flex gap-3 mt-5">
+                    <button onclick="closeReportarModal()"
+                        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm font-medium hover:bg-gray-200">Cancelar</button>
+                    <button onclick="submitReportarModal()"
+                        class="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700">
+                        <i class="fas fa-paper-plane mr-1"></i>Enviar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Solicitar equipo -->
+        <div id="modal-solicitar"
+            class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+                <h3 class="text-base font-bold text-navy mb-1">
+                    <i class="fas fa-hand-paper mr-2"></i>Solicitar préstamo
+                </h3>
+                <p class="text-sm text-gray-500 mb-4" id="modal-solicitar-titulo">-</p>
+                <input type="hidden" id="modal-solicitar-eqid">
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Motivo de la solicitud</label>
+                        <textarea id="modal-solicitar-motivo" rows="3"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy resize-none"
+                            placeholder="¿Para qué necesitas este equipo?"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Duración estimada</label>
+                        <input type="text" id="modal-solicitar-duracion"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"
+                            placeholder="Ej: 3 días, 1 semana, indefinido">
+                    </div>
+                </div>
+                <div class="flex gap-3 mt-5">
+                    <button onclick="closeSolicitarModal()"
+                        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm font-medium hover:bg-gray-200">Cancelar</button>
+                    <button onclick="submitSolicitar()"
+                        class="flex-1 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:bg-navy-dark">
+                        <i class="fas fa-paper-plane mr-1"></i>Enviar solicitud
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Welcome card -->
+    <div class="wcard" id="wcard">
+        <div style="font-size:2rem;margin-bottom:8px">👋</div>
+        <div style="font-size:18px;font-weight:800;color:#001f3f" id="wtitle">Hola</div>
+        <div style="font-size:12px;font-weight:500;color:#64748B;margin-top:4px" id="wsub">Cargando tu workspace...
+        </div>
+        <div class="w-bar">
+            <div class="w-prog" id="wprog"></div>
+        </div>
+    </div>
+
+    <!-- Toast éxito -->
+    <div id="user-toast"
+        class="hidden fixed bottom-6 right-6 bg-navy text-white px-5 py-3 rounded-xl shadow-xl text-sm font-medium z-50 flex items-center gap-2">
+        <i class="fas fa-check-circle text-green-400"></i>
+        <span id="user-toast-msg">Acción completada</span>
+    </div>
+
+    <script th:src="@{/js/db.js}"></script>
+    <script th:src="@{/js/user2.js}"></script>
+</body>
+
+</html>
