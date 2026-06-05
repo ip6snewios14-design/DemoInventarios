@@ -37,7 +37,7 @@ const userProfiles = {
     'user': {
         nombre: 'Carlos López',
         area: 'RH',
-        equiposAsignados: ['MON-002', 'MOU-001', 'KEY-001']
+        equiposAsignados: ['MON-002']
     }
 };
 

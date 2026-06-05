@@ -474,6 +474,69 @@
                 </div>
             </div>
         </div>
+        <!-- Modal: Levantar pedido -->
+        <div id="modal-pedido"
+            class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+                <h3 class="text-base font-bold text-navy mb-1">
+                    <i class="fas fa-plus-circle mr-2"></i>Levantar pedido de equipo
+                </h3>
+                <p class="text-xs text-gray-400 mb-4">El administrador revisara tu solicitud y te notificara</p>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Tipo de equipo que necesitas</label>
+                        <select id="modal-pedido-tipo"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+                            <option>Laptop</option>
+                            <option>Monitor</option>
+                            <option>Mouse</option>
+                            <option>Teclado</option>
+                            <option>CPU</option>
+                            <option>Audifonos</option>
+                            <option>Tablet</option>
+                            <option>Impresora</option>
+                            <option>Otro</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Marca o modelo preferido
+                            (opcional)</label>
+                        <input type="text" id="modal-pedido-marca"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy"
+                            placeholder="Ej: Dell Latitude, Logitech MX...">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Caracteristicas requeridas</label>
+                        <textarea id="modal-pedido-caracteristicas" rows="2"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy resize-none"
+                            placeholder="Ej: 16GB RAM, pantalla 4K, teclado mecanico..."></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Motivo del pedido</label>
+                        <textarea id="modal-pedido-motivo" rows="2"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy resize-none"
+                            placeholder="Por que necesitas este equipo?"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Urgencia</label>
+                        <select id="modal-pedido-urgencia"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-navy">
+                            <option value="Alta">Alta - Lo necesito pronto</option>
+                            <option value="Media" selected>Media - En los proximos dias</option>
+                            <option value="Baja">Baja - Sin prisa</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex gap-3 mt-5">
+                    <button onclick="closePedidoModal()"
+                        class="flex-1 py-2 bg-gray-100 rounded-lg text-sm font-medium hover:bg-gray-200">Cancelar</button>
+                    <button onclick="submitPedido()"
+                        class="flex-1 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:bg-navy-dark">
+                        <i class="fas fa-paper-plane mr-1"></i>Enviar pedido
+                    </button>
+                </div>
+            </div>
+        </div>
 
     </main>
 
@@ -496,7 +559,7 @@
     </div>
     <script th:src="@{/js/user.js}"></script>
     <script th:src="@{/js/db.js}"></script>
-    
+
 </body>
 
 </html>

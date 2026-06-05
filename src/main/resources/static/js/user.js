@@ -1,4 +1,4 @@
-console.log('user.js cargado, versión 2');
+console.log('user.js cargado, version 2');
 let currentUsername = '';
 
 const iconos = {
@@ -25,7 +25,9 @@ function calcularEstado(historial) {
     const u = historial[0];
     let estado = '';
     switch (u.tipo) {
-        case 'alta': case 'devolucion': case 'regreso_mantenimiento': estado = 'Disponible'; break;
+        case 'alta': case 'devolucion': case 'regreso_mantenimiento':
+        case 'solicitud_prestamo':
+            estado = 'Disponible'; break;
         case 'asignacion': case 'reasignacion': estado = 'Asignado'; break;
         case 'envio_mantenimiento': estado = 'En Mantenimiento'; break;
         case 'baja': estado = 'Baja Definitiva'; break;
@@ -78,6 +80,14 @@ function renderSetup() {
 
     if (misEquipos.length === 0 && disponibles.length === 0) {
         grid.classList.add('hidden');
+        empty.innerHTML = `
+        <i class="fas fa-inbox text-4xl mb-3 block"></i>
+        <p class="font-medium">Sin equipos asignados</p>
+        <p class="text-sm mt-1 mb-4">No tienes equipos en este momento</p>
+        <button onclick="openPedidoModal()"
+            class="px-6 py-2 bg-navy text-white rounded-lg text-sm font-semibold hover:bg-navy-dark transition">
+            <i class="fas fa-hand-paper mr-2"></i>Levantar pedido
+        </button>`;
         empty.classList.remove('hidden');
         return;
     }
@@ -89,7 +99,7 @@ function renderSetup() {
         <div class="device-card ok">
             <div class="absolute top-3 right-3">
                 <span class="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-bold rounded-full">
-                    ✓ Lo tengo
+                    Lo tengo
                 </span>
             </div>
             <div class="device-icon">${iconos[eq.tipo] || '📦'}</div>
@@ -104,13 +114,24 @@ function renderSetup() {
         </div>`).join('');
 
     const solicitudesPendientes = JSON.parse(localStorage.getItem('warehouse-reports') || '[]')
-        .filter(r => r.reporter === perfil.nombre && r.type === 'Solicitud de préstamo' && r.status === 'Pendiente')
+        .filter(r => r.reporter === perfil.nombre
+            && (r.type === 'Solicitud de prestamo' || r.type === 'Solicitud de préstamo')
+            && r.status === 'Pendiente')
         .map(r => r.equipmentId);
+    const solicitudesAprobadas = JSON.parse(localStorage.getItem('user-eventos') || '[]')
+        .filter(ev => ev.reporter === perfil.nombre && ev.tipo === 'aprobado')
+        .map(ev => ev.equipmentId);
 
-    const disponiblesHtml = disponibles.map(eq => {
+    const disponiblesOrdenados = disponibles.slice().sort(function (a, b) {
+        const aPendiente = solicitudesPendientes.includes(a.id) ? 0 : 1;
+        const bPendiente = solicitudesPendientes.includes(b.id) ? 0 : 1;
+        return aPendiente - bPendiente;
+    });
+
+    const disponiblesHtml = disponiblesOrdenados.map(eq => {
         const yaSolicitado = solicitudesPendientes.includes(eq.id);
         const badge = yaSolicitado
-            ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">⏳ En espera</span>'
+            ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">En espera</span>'
             : '<span class="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">Disponible</span>';
         const statusBadge = yaSolicitado
             ? '<span class="device-status bg-amber-100 text-amber-800">Esperando respuesta</span>'
@@ -132,7 +153,18 @@ function renderSetup() {
         </div>`;
     }).join('');
 
-    grid.innerHTML = asignadasHtml + disponiblesHtml;
+    const pedidoHtml = `
+    <div class="device-card" style="border-style:dashed;opacity:.7">
+        <div class="device-icon" style="filter:grayscale(1)">📋</div>
+        <span class="device-name" style="text-align:center">No encuentras lo que necesitas?</span>
+        <span class="device-model">Solicita un equipo especifico</span>
+        <button onclick="openPedidoModal()"
+            class="mt-2 w-full py-1.5 bg-navy text-white rounded-lg text-xs font-semibold hover:bg-navy-dark transition">
+            <i class="fas fa-plus mr-1"></i>Levantar pedido
+        </button>
+    </div>`;
+
+    grid.innerHTML = pedidoHtml + asignadasHtml + disponiblesHtml;
 }
 
 function renderTimeline() {
@@ -145,17 +177,28 @@ function renderTimeline() {
 
     const todosIds = [...new Set([...misIds, ...solicitadosIds])];
 
-    const eventos = dbBase.eventos
-        .filter(ev => todosIds.includes(ev.equipoId))
-        .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
-        .slice(0, 20);
+    const eventosAdmin = JSON.parse(localStorage.getItem('user-eventos') || '[]')
+        .filter(ev => ev.reporter === perfil.nombre)
+        .map(ev => ({
+            id: 'ADM-' + ev.fecha,
+            equipoId: ev.equipmentId,
+            tipo: ev.tipo === 'aprobado' ? 'solicitud_aprobada' : 'solicitud_rechazada',
+            fecha: ev.fecha,
+            usuario: perfil.nombre,
+            area: '',
+            notas: ev.tipo === 'aprobado' ? 'El administrador aprobo tu solicitud' : 'El administrador rechazo tu solicitud'
+        }));
+
+    const todosEventos = [
+        ...dbBase.eventos.filter(ev => todosIds.includes(ev.equipoId)),
+        ...eventosAdmin
+    ].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 25);
 
     const dotClass = tipo => {
-        if (['alta', 'regreso_mantenimiento', 'devolucion'].includes(tipo)) return 'green';
+        if (['alta', 'regreso_mantenimiento', 'devolucion', 'solicitud_aprobada'].includes(tipo)) return 'green';
         if (['asignacion', 'reasignacion'].includes(tipo)) return 'blue';
-        if (tipo === 'envio_mantenimiento') return 'red';
-        if (tipo === 'solicitud_prestamo') return 'amber';
-        if (tipo === 'baja') return 'amber';
+        if (['envio_mantenimiento', 'solicitud_rechazada'].includes(tipo)) return 'red';
+        if (['solicitud_prestamo', 'baja'].includes(tipo)) return 'amber';
         return 'amber';
     };
 
@@ -167,16 +210,18 @@ function renderTimeline() {
         envio_mantenimiento: 'Enviado a mantenimiento',
         regreso_mantenimiento: 'Regreso de mantenimiento',
         baja: 'Baja definitiva',
-        solicitud_prestamo: 'Solicitud de prestamo enviada'
+        solicitud_prestamo: 'Solicitud de prestamo enviada',
+        solicitud_aprobada: 'Solicitud aprobada por admin',
+        solicitud_rechazada: 'Solicitud rechazada por admin'
     }[tipo] || tipo);
 
     const tl = document.getElementById('user-timeline');
-    if (!eventos.length) {
+    if (!todosEventos.length) {
         tl.innerHTML = '<p class="text-sm text-gray-400">Sin actividad registrada</p>';
         return;
     }
 
-    tl.innerHTML = eventos.map(ev => {
+    tl.innerHTML = todosEventos.map(ev => {
         const eq = dbBase.equipos.find(e => e.id === ev.equipoId);
         return `
         <div class="tl-item">
@@ -208,7 +253,16 @@ function renderUserReports() {
 
     const prioColor = p => p === 'Alta' ? 'bg-red-100 text-red-700' :
         p === 'Media' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700';
-    const statusColor = s => s === 'Pendiente' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700';
+    const statusColor = s =>
+        s === 'Pendiente' ? 'bg-amber-100 text-amber-700' :
+            s === 'Aprobado' ? 'bg-blue-100 text-blue-700' :
+                s === 'Rechazado' ? 'bg-red-100 text-red-700' :
+                    'bg-green-100 text-green-700';
+    const statusIcon = s =>
+        s === 'Pendiente' ? '<i class="fas fa-clock"></i>' :
+            s === 'Aprobado' ? '<i class="fas fa-check-circle"></i>' :
+                s === 'Rechazado' ? '<i class="fas fa-times-circle"></i>' :
+                    '<i class="fas fa-check-circle"></i>';
 
     container.innerHTML = userReports.map(r => `
         <div class="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border border-gray-100">
@@ -221,14 +275,12 @@ function renderUserReports() {
                 <p class="text-xs text-gray-600 truncate">${r.type}: ${r.description}</p>
                 <p class="text-xs text-gray-400 mt-0.5">${r.date}</p>
             </div>
-            ${r.status === 'Pendiente'
-                ? '<span class="text-xs text-amber-500 flex-shrink-0 mt-1"><i class="fas fa-clock"></i></span>'
-                : '<span class="text-xs text-green-500 flex-shrink-0 mt-1"><i class="fas fa-check-circle"></i></span>'
-            }
+            <span class="text-xs flex-shrink-0 mt-1 ${statusColor(r.status)}">${statusIcon(r.status)}</span>
         </div>`).join('');
 }
 
 function populateReportSelect() {
+    const perfil = getPerfil();
     const equipos = getMisEquipos();
     const sel = document.getElementById('user-report-equipo');
     sel.innerHTML = equipos.length
@@ -265,9 +317,7 @@ function submitUserReport() {
     showToast('Reporte enviado correctamente');
     renderTimeline();
     renderUserReports();
-    setTimeout(() => addChatMessage(
-        'Recibimos tu reporte sobre ' + eqId + '. Lo revisaremos a la brevedad. Prioridad: ' + prioridad + '.', 'support'
-    ), 800);
+    setTimeout(function () { addChatMessage('Recibimos tu reporte sobre ' + eqId + '. Lo revisaremos a la brevedad. Prioridad: ' + prioridad + '.', 'support'); }, 800);
 }
 
 function openReportarModal(eqId) {
@@ -311,9 +361,7 @@ function submitReportarModal() {
     showToast('Reporte enviado al administrador');
     renderTimeline();
     renderUserReports();
-    setTimeout(() => addChatMessage(
-        'Recibimos tu reporte sobre ' + eqId + '. Prioridad: ' + prio + '. Te notificaremos pronto.', 'support'
-    ), 800);
+    setTimeout(function () { addChatMessage('Recibimos tu reporte sobre ' + eqId + '. Prioridad: ' + prio + '. Te notificaremos pronto.', 'support'); }, 800);
 }
 
 function openSolicitarModal(eqId) {
@@ -353,11 +401,10 @@ function submitSolicitar() {
     });
     saveDB();
     closeSolicitarModal();
+    renderSetup();
     renderTimeline();
     showToast('Solicitud enviada al administrador');
-    setTimeout(() => addChatMessage(
-        'Tu solicitud de ' + eqId + ' fue recibida. El administrador la revisara y te confirmara.', 'support'
-    ), 800);
+    setTimeout(function () { addChatMessage('Tu solicitud de ' + eqId + ' fue recibida. El administrador la revisara y te confirmara.', 'support'); }, 800);
 }
 
 const chatResponses = [
@@ -366,7 +413,7 @@ const chatResponses = [
     'Gracias por reportarlo. Puedes darnos mas detalles?',
     'Hemos escalado tu ticket al equipo de soporte.',
     'El tiempo estimado de respuesta es de 24 horas habiles.',
-    'El problema persiste despues de reiniciar el equipo?',
+    'El problema persiste despues de reiniciar el equipo?'
 ];
 
 function addChatMessage(text, who) {
@@ -387,7 +434,7 @@ function sendChatMessage() {
     if (!text) return;
     addChatMessage(text, 'user');
     input.value = '';
-    setTimeout(function() {
+    setTimeout(function () {
         const resp = chatResponses[Math.floor(Math.random() * chatResponses.length)];
         addChatMessage(resp, 'support');
     }, 900 + Math.random() * 600);
@@ -397,11 +444,11 @@ function showToast(msg) {
     const t = document.getElementById('user-toast');
     document.getElementById('user-toast-msg').textContent = msg;
     t.classList.remove('hidden');
-    setTimeout(function() { t.classList.add('hidden'); }, 3000);
+    setTimeout(function () { t.classList.add('hidden'); }, 3000);
 }
 
 function switchTab(tabId) {
-    document.querySelectorAll('[data-tab]').forEach(function(btn) { btn.classList.remove('active'); });
+    document.querySelectorAll('[data-tab]').forEach(function (btn) { btn.classList.remove('active'); });
     document.querySelector('[data-tab="' + tabId + '"]').classList.add('active');
     document.getElementById('tab-setup').classList.toggle('hidden', tabId !== 'setup');
     document.getElementById('tab-historial').classList.toggle('hidden', tabId !== 'historial');
@@ -412,11 +459,69 @@ function showWelcome() {
     const perfil = getPerfil();
     const w = document.getElementById('wcard');
     const p = document.getElementById('wprog');
-    document.getElementById('wtitle').textContent = 'Hola, ' + perfil.nombre.split(' ')[0] + ' !';
+    document.getElementById('wtitle').textContent = 'Hola, ' + perfil.nombre.split(' ')[0] + '!';
     document.getElementById('wsub').textContent = 'Cargando tu workspace...';
     w.classList.add('show');
-    setTimeout(function() { p.style.width = '100%'; }, 150);
-    setTimeout(function() { w.classList.remove('show'); }, 2600);
+    setTimeout(function () { p.style.width = '100%'; }, 150);
+    setTimeout(function () { w.classList.remove('show'); }, 2600);
+}
+function openPedidoModal() {
+    document.getElementById('modal-pedido-tipo').value = 'Laptop';
+    document.getElementById('modal-pedido-marca').value = '';
+    document.getElementById('modal-pedido-caracteristicas').value = '';
+    document.getElementById('modal-pedido-motivo').value = '';
+    document.getElementById('modal-pedido-urgencia').value = 'Media';
+    document.getElementById('modal-pedido').classList.remove('hidden');
+}
+
+function closePedidoModal() {
+    document.getElementById('modal-pedido').classList.add('hidden');
+}
+
+function submitPedido() {
+    const perfil = getPerfil();
+    const tipo = document.getElementById('modal-pedido-tipo').value;
+    const marca = document.getElementById('modal-pedido-marca').value.trim();
+    const caract = document.getElementById('modal-pedido-caracteristicas').value.trim();
+    const motivo = document.getElementById('modal-pedido-motivo').value.trim();
+    const urgencia = document.getElementById('modal-pedido-urgencia').value;
+
+    if (!motivo) { showToast('Indica el motivo del pedido'); return; }
+
+    const desc = 'Tipo: ' + tipo
+        + (marca ? ' | Marca/Modelo preferido: ' + marca : '')
+        + (caract ? ' | Caracteristicas: ' + caract : '')
+        + ' | Motivo: ' + motivo;
+
+    const reports = JSON.parse(localStorage.getItem('warehouse-reports') || '[]');
+    reports.push({
+        id: 'RP-' + Date.now(),
+        equipmentId: 'PEDIDO',
+        type: 'Solicitud de prestamo',
+        description: desc,
+        reporter: perfil.nombre,
+        priority: urgencia,
+        date: new Date().toISOString().split('T')[0],
+        status: 'Pendiente'
+    });
+    localStorage.setItem('warehouse-reports', JSON.stringify(reports));
+
+    dbBase.eventos.push({
+        id: 'EVT-U' + Date.now(),
+        equipoId: 'PEDIDO',
+        tipo: 'solicitud_prestamo',
+        fecha: new Date().toISOString().split('T')[0],
+        usuario: perfil.nombre,
+        area: perfil.area,
+        notas: desc.substring(0, 80)
+    });
+    saveDB();
+    closePedidoModal();
+    renderTimeline();
+    showToast('Pedido enviado al administrador');
+    setTimeout(function () {
+        addChatMessage('Recibimos tu pedido de ' + tipo + '. El administrador lo revisara pronto. Prioridad: ' + urgencia + '.', 'support');
+    }, 800);
 }
 
 function initUser() {
@@ -424,7 +529,7 @@ function initUser() {
     loadDB();
 
     const eventos = JSON.parse(localStorage.getItem('db-eventos') || '[]');
-    const tieneNuevos = eventos.some(function(e) { return e.id === 'EVT-018'; });
+    const tieneNuevos = eventos.some(function (e) { return e.id === 'EVT-018'; });
     if (!tieneNuevos) {
         localStorage.removeItem('db-equipos');
         localStorage.removeItem('db-eventos');
@@ -438,11 +543,11 @@ function initUser() {
 
     addChatMessage('Hola! Soy el asistente de soporte tecnico. En que puedo ayudarte hoy?', 'support');
 
-    document.querySelectorAll('[data-tab]').forEach(function(btn) {
-        btn.addEventListener('click', function() { switchTab(btn.dataset.tab); });
+    document.querySelectorAll('[data-tab]').forEach(function (btn) {
+        btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
     });
 
-    document.getElementById('chat-input').addEventListener('keydown', function(e) {
+    document.getElementById('chat-input').addEventListener('keydown', function (e) {
         if (e.key === 'Enter') sendChatMessage();
     });
 

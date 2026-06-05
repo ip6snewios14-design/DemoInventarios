@@ -55,7 +55,6 @@ function updateStats() {
 }
 
 function updateNotificationCount() {
-    const unread = notifications.filter(n => !n.read).length;
     document.getElementById('notification-count').innerText = notifications.length > 0 ? Math.min(notifications.length, 4) : 0;
     document.getElementById('total-notifications').innerText = notifications.length;
     document.getElementById('loan-notifications').innerText = notifications.filter(n => n.type === 'Préstamo').length;
@@ -64,7 +63,6 @@ function updateNotificationCount() {
 }
 
 function renderNotifications(filterType = 'todos') {
-    // Sincroniza botones de filtro activo
     document.querySelectorAll('.notif-filter-btn').forEach(btn => {
         const isActive = btn.dataset.filter === filterType;
         btn.classList.toggle('bg-navy', isActive);
@@ -175,6 +173,12 @@ function renderTables() {
             p === 'Alta' ? 'bg-red-100 text-red-800' :
                 p === 'Media' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800';
 
+        const statusBadge = s =>
+            s === 'Pendiente' ? 'bg-amber-100 text-amber-800' :
+                s === 'Aprobado' ? 'bg-blue-100 text-blue-800' :
+                    s === 'Rechazado' ? 'bg-red-100 text-red-800' :
+                        'bg-green-100 text-green-800';
+
         const filtered = reports.filter(r => {
             if (filter !== 'todos' && r.status !== filter) return false;
             if (search && !(r.equipmentId.toLowerCase().includes(search) || r.reporter.toLowerCase().includes(search))) return false;
@@ -183,22 +187,28 @@ function renderTables() {
 
         rpBody.innerHTML = filtered.map(r => {
             const eq = dbBase.equipos.find(e => e.id === r.equipmentId);
+            const esSolicitud = r.type === 'Solicitud de prestamo';
+            const botones = esSolicitud && r.status === 'Pendiente'
+                ? `<button data-id="${r.id}" class="aprobar-solicitud-btn px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Aprobar</button>
+                   <button data-id="${r.id}" class="rechazar-solicitud-btn px-3 py-1 text-xs bg-red-100 text-red-600 rounded hover:bg-red-200">Rechazar</button>`
+                : `<button data-id="${r.id}" class="resolve-btn px-3 py-1 text-xs ${r.status === 'Pendiente' ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-100 text-gray-500 cursor-default'} rounded">${r.status === 'Pendiente' ? 'Resolver' : r.status}</button>`;
+
             return `<tr class="hover:bg-gray-50 transition">
-            <td class="px-4 py-3 font-semibold text-navy">${r.id}</td>
-            <td class="px-4 py-3">
-                <p class="font-medium">${r.equipmentId}</p>
-                <p class="text-xs text-gray-400">${eq ? eq.marca + ' ' + eq.modelo : '-'}</p>
-            </td>
-            <td class="px-4 py-3 text-gray-600">${r.type}</td>
-            <td class="px-4 py-3 text-gray-500 max-w-xs truncate">${r.description}</td>
-            <td class="px-4 py-3">${r.reporter}</td>
-            <td class="px-4 py-3"><span class="px-3 py-1 rounded-full text-xs font-bold ${prioClass(r.priority)}">${r.priority}</span></td>
-            <td class="px-4 py-3"><span class="px-3 py-1 rounded-full text-xs font-bold ${r.status === 'Pendiente' ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'}">${r.status}</span></td>
-            <td class="px-4 py-3 flex gap-2">
-                <button data-id="${r.id}" class="resolve-btn px-3 py-1 text-xs ${r.status === 'Pendiente' ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-500'} rounded ${r.status === 'Pendiente' ? 'hover:bg-green-700' : 'cursor-default'}">${r.status === 'Pendiente' ? 'Resolver' : 'Resuelto'}</button>
-                <button data-eq="${r.equipmentId}" class="rep-qr-btn px-3 py-1 text-xs bg-gray-800 text-white rounded hover:bg-black"><i class="fas fa-qrcode"></i></button>
-            </td>
-        </tr>`;
+                <td class="px-4 py-3 font-semibold text-navy">${r.id}</td>
+                <td class="px-4 py-3">
+                    <p class="font-medium">${r.equipmentId}</p>
+                    <p class="text-xs text-gray-400">${eq ? eq.marca + ' ' + eq.modelo : '-'}</p>
+                </td>
+                <td class="px-4 py-3 text-gray-600">${r.type}</td>
+                <td class="px-4 py-3 text-gray-500 max-w-xs truncate">${r.description}</td>
+                <td class="px-4 py-3">${r.reporter}</td>
+                <td class="px-4 py-3"><span class="px-3 py-1 rounded-full text-xs font-bold ${prioClass(r.priority)}">${r.priority}</span></td>
+                <td class="px-4 py-3"><span class="px-3 py-1 rounded-full text-xs font-bold ${statusBadge(r.status)}">${r.status}</span></td>
+                <td class="px-4 py-3 flex gap-2">
+                    ${botones}
+                    <button data-eq="${r.equipmentId}" class="rep-qr-btn px-3 py-1 text-xs bg-gray-800 text-white rounded hover:bg-black"><i class="fas fa-qrcode"></i></button>
+                </td>
+            </tr>`;
         }).join('') || '<tr><td colspan="8" class="text-center py-8 text-gray-400">Sin resultados</td></tr>';
     }
 }
@@ -311,6 +321,70 @@ function bindEvents() {
             if (scanBtn) scanBtn.click();
         }
 
+        // Aprobar solicitud de prestamo
+        if (e.target.closest('.aprobar-solicitud-btn')) {
+            const rid = e.target.closest('.aprobar-solicitud-btn').dataset.id;
+            const rep = reports.find(r => r.id === rid);
+            if (!rep) return;
+            rep.status = 'Aprobado';
+            const perfil = Object.values(userProfiles).find(p => p.nombre === rep.reporter);
+            dbBase.eventos.push({
+                id: nextId('EVT', dbBase.eventos),
+                equipoId: rep.equipmentId,
+                tipo: 'asignacion',
+                fecha: new Date().toISOString().split('T')[0],
+                usuario: rep.reporter,
+                area: perfil ? perfil.area : 'N/A',
+                notas: 'Solicitud aprobada por administrador'
+            });
+            saveDB();
+            notifications.unshift({
+                id: 'NT-' + Date.now(),
+                type: 'Préstamo',
+                message: 'Solicitud aprobada: ' + rep.equipmentId + ' asignado a ' + rep.reporter,
+                date: new Date().toLocaleString('es-ES'),
+                read: false
+            });
+            const eventosUser = JSON.parse(localStorage.getItem('user-eventos') || '[]');
+            eventosUser.push({
+                equipmentId: rep.equipmentId,
+                reporter: rep.reporter,
+                tipo: 'aprobado',
+                fecha: new Date().toLocaleString('es-ES')
+            });
+            localStorage.setItem('user-eventos', JSON.stringify(eventosUser));
+            saveData();
+            renderTables();
+            syncDashboard();
+            showReportSuccess('Solicitud aprobada', rep.equipmentId + ' asignado a ' + rep.reporter);
+        }
+
+        // Rechazar solicitud de prestamo
+        if (e.target.closest('.rechazar-solicitud-btn')) {
+            const rid = e.target.closest('.rechazar-solicitud-btn').dataset.id;
+            const rep = reports.find(r => r.id === rid);
+            if (!rep) return;
+            rep.status = 'Rechazado';
+            notifications.unshift({
+                id: 'NT-' + Date.now(),
+                type: 'Reporte',
+                message: 'Solicitud rechazada: ' + rep.equipmentId + ' para ' + rep.reporter,
+                date: new Date().toLocaleString('es-ES'),
+                read: false
+            });
+            const eventosUser = JSON.parse(localStorage.getItem('user-eventos') || '[]');
+            eventosUser.push({
+                equipmentId: rep.equipmentId,
+                reporter: rep.reporter,
+                tipo: 'rechazado',
+                fecha: new Date().toLocaleString('es-ES')
+            });
+            localStorage.setItem('user-eventos', JSON.stringify(eventosUser));
+            saveData();
+            renderTables();
+            syncDashboard();
+        }
+
         // Filtro notificaciones
         const filterBtn = e.target.closest('.notif-filter-btn');
         if (filterBtn) {
@@ -318,7 +392,7 @@ function bindEvents() {
             return;
         }
 
-        // Borrar notificación individual
+        // Borrar notificacion individual
         const delBtn = e.target.closest('.notif-delete-btn');
         if (delBtn) {
             notifications = notifications.filter(n => n.id !== delBtn.dataset.id);
@@ -358,11 +432,9 @@ function bindEvents() {
         document.getElementById('equipment-info').classList.add('hidden');
     });
 
-    // Inventario: filtro de búsqueda
     const si = document.getElementById('search-inventory');
     if (si) si.addEventListener('keyup', renderInventory);
 
-    // QR Préstamos
     const loanQrScanBtn = document.getElementById('loan-qr-scan-btn');
     if (loanQrScanBtn) loanQrScanBtn.addEventListener('click', () => {
         const id = document.getElementById('loan-qr-input').value.trim().toUpperCase();
@@ -397,19 +469,14 @@ function bindEvents() {
         document.getElementById('loan-qr-result').classList.add('hidden');
     });
 
-    // Préstamos
     document.getElementById('new-loan-btn').onclick = () => openLoanModal();
-
-    // Reportes
     document.getElementById('new-report-btn').onclick = () => openReportModal();
 
-    // Filtros reportes
     const sr = document.getElementById('search-reports');
     const fr = document.getElementById('filter-reports');
     if (sr) sr.addEventListener('keyup', renderTables);
     if (fr) fr.addEventListener('change', renderTables);
 
-    // QR Reportes
     const rqsBtn = document.getElementById('report-qr-scan-btn');
     if (rqsBtn) rqsBtn.addEventListener('click', () => {
         const id = document.getElementById('report-qr-input').value.trim().toUpperCase();
@@ -432,7 +499,6 @@ function bindEvents() {
         document.getElementById('report-qr-result').classList.add('hidden');
     });
 
-    // Notificaciones: limpiar historial
     document.getElementById('clear-notifications-btn').onclick = () => {
         if (confirm("¿Borrar historial de notificaciones?")) {
             notifications = [];
@@ -440,6 +506,7 @@ function bindEvents() {
             renderNotifications();
         }
     };
+
     document.getElementById('notification-bell').onclick = (e) => {
         e.stopPropagation();
         const dropdown = document.getElementById('notif-dropdown');
@@ -465,14 +532,12 @@ function bindEvents() {
     const refreshBtn = document.getElementById('refresh-equipment');
     if (refreshBtn) refreshBtn.onclick = () => renderInventory();
 
-    // Historial filtros
     const sh = document.getElementById('search-history');
     const fh = document.getElementById('filter-history');
     if (sh) sh.addEventListener('keyup', renderTables);
     if (fh) fh.addEventListener('change', renderTables);
 }
 
-// DASHBOARD KANBAN
 function renderDashboardKanban() {
     const groups = { available: [], loaned: [], reported: [] };
     dbBase.equipos.forEach(eq => {
@@ -527,7 +592,6 @@ function showWelcome() {
     setTimeout(() => w.classList.remove('show'), 2800);
 }
 
-// MODAL PRÉSTAMOS
 let loanEquipoSeleccionado = null;
 
 function openLoanModal() {
@@ -632,13 +696,14 @@ function saveLoan() {
 function showLoanSuccess(eqId, nombre, empleado) {
     const w = document.getElementById('loan-success-card');
     const p = document.getElementById('loan-success-prog');
-    document.getElementById('loan-success-title').textContent = '✓ Préstamo registrado';
+    document.getElementById('loan-success-title').textContent = 'Préstamo registrado';
     document.getElementById('loan-success-sub').textContent = `${eqId} — ${nombre} → ${empleado}`;
     p.style.width = '0';
     w.classList.add('show');
     setTimeout(() => p.style.width = '100%', 100);
     setTimeout(() => w.classList.remove('show'), 3000);
 }
+
 function openReportModal(prefilledId = '') {
     document.getElementById('modal-report').classList.remove('hidden');
     document.getElementById('report-equipment-id').value = prefilledId;
@@ -648,7 +713,6 @@ function openReportModal(prefilledId = '') {
     document.getElementById('report-priority').value = 'Alta';
     document.getElementById('report-eq-dropdown').classList.add('hidden');
 
-    // Dropdown de búsqueda
     const input = document.getElementById('report-equipment-id');
     input.addEventListener('input', function () {
         const val = this.value.toLowerCase();
@@ -663,8 +727,7 @@ function openReportModal(prefilledId = '') {
         const iconos = { Laptop: '💻', Monitor: '🖥️', Mouse: '🖱️', Teclado: '⌨️', CPU: '🖥', 'Audífonos': '🎧', Asistente: '🔊', Tablet: '📱', Impresora: '🖨️', Otro: '📦' };
         dropdown.innerHTML = matches.map(eq => {
             const info = getEstado(eq.id);
-            return `<div class="dropdown-item px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2 border-b last:border-0"
-                data-id="${eq.id}">
+            return `<div class="dropdown-item px-3 py-2 hover:bg-gray-50 cursor-pointer flex items-center gap-2 border-b last:border-0" data-id="${eq.id}">
                 <span>${iconos[eq.tipo] || '📦'}</span>
                 <div>
                     <p class="text-xs font-bold text-navy">${eq.id}</p>
@@ -715,8 +778,9 @@ function confirmResolve() {
     saveData(); renderTables(); syncDashboard();
     closeResolveModal();
     const eq = dbBase.equipos.find(e => e.id === rep.equipmentId);
-    showReportSuccess('✅ Reporte resuelto', `${rep.equipmentId}${eq ? ' — ' + eq.marca + ' ' + eq.modelo : ''}`);
+    showReportSuccess('Reporte resuelto', `${rep.equipmentId}${eq ? ' — ' + eq.marca + ' ' + eq.modelo : ''}`);
 }
+
 function saveReport() {
     const eqId = document.getElementById('report-equipment-id').value.trim().toUpperCase();
     const type = document.getElementById('report-type').value;
@@ -733,8 +797,9 @@ function saveReport() {
     notifications.unshift({ id: 'NT-' + Date.now(), type: "Reporte", message: `Reporte: ${eqId} - ${type} (${priority})`, date: new Date().toLocaleString('es-ES'), read: false });
     saveData(); renderTables(); syncDashboard();
     closeReportModal();
-    showReportSuccess('⚠️ Reporte registrado', `${eqId} — ${type} · Prioridad ${priority}`);
+    showReportSuccess('Reporte registrado', `${eqId} — ${type} · Prioridad ${priority}`);
 }
+
 function showReportSuccess(mensaje, subtitulo) {
     const w = document.getElementById('loan-success-card');
     const p = document.getElementById('loan-success-prog');
@@ -772,16 +837,13 @@ function renderNotifDropdown() {
     const label = document.getElementById('notif-dropdown-count-label');
     if (label) label.textContent = notifications.length > 4
         ? `Mostrando 4 de ${notifications.length}`
-        : `${notifications.length} notificación${notifications.length !== 1 ? 'es' : ''}`;
+        : `${notifications.length} notificacion${notifications.length !== 1 ? 'es' : ''}`;
 }
 
 function initApp() {
     loadDB();
-    console.log('después de loadDB:', dbBase.equipos.length);
     loadData();
-    console.log('después de loadData:', dbBase.equipos.length);
     initInventory();
-    console.log('después de initInventory:', dbBase.equipos.length);
     document.getElementById('user-role-badge').innerHTML =
         currentRole === 'admin'
             ? '<i class="fas fa-crown"></i> Administrador'
