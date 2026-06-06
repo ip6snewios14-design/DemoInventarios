@@ -226,7 +226,7 @@ function renderNavigation() {
     const items = [
         { id: "dashboard", label: "Dashboard", icon: "fas fa-tachometer-alt" },
         { id: "monitoring", label: "Inventario", icon: "fas fa-desktop", adminOnly: true },
-        { id: "loans", label: "Préstamos", icon: "fas fa-exchange-alt", adminOnly: true },
+        { id: "loans", label: "EquipaTE", icon: "fas fa-exchange-alt", adminOnly: true },
         { id: "history", label: "Historial", icon: "fas fa-history", adminOnly: true },
         { id: "reports", label: "Reportes", icon: "fas fa-exclamation-triangle" },
         { id: "alexa", label: "Notificaciones", icon: "fas fa-bell" }
