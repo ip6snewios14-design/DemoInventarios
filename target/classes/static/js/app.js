@@ -696,7 +696,7 @@ function saveLoan() {
 function showLoanSuccess(eqId, nombre, empleado) {
     const w = document.getElementById('loan-success-card');
     const p = document.getElementById('loan-success-prog');
-    document.getElementById('loan-success-title').textContent = 'Préstamo registrado';
+    document.getElementById('loan-success-title').textContent = 'Asignación registrada';
     document.getElementById('loan-success-sub').textContent = `${eqId} — ${nombre} → ${empleado}`;
     p.style.width = '0';
     w.classList.add('show');
