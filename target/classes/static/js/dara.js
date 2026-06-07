@@ -1,534 +1,477 @@
-const DARA = {
-    recognition: null,
-    synth: window.speechSynthesis,
-    listening: false,
-    active: false,
-    conversacion: null,
-    paso: 0,
-    datos: {},
-    vozSeleccionada: null,
+/**
+ * DARA — Asistente de voz (Admin)
+ * Fix principal: recognition se recrea en cada ciclo de escucha.
+ * La Web Speech API deja la instancia en estado "zombie" después de abort/error;
+ * recrearla es la única solución robusta cross-browser.
+ */
 
-    init() {
-        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-            console.warn('DARA: SpeechRecognition no disponible');
-            return;
+const DARA = (() => {
+
+    const STATE = { OFF:'off', IDLE:'idle', LISTENING:'listening', SPEAKING:'speaking' };
+    let state  = STATE.OFF;
+    let synth  = window.speechSynthesis;
+    let vozSel = null;
+    let SR     = null;   // clase SpeechRecognition guardada
+
+    let flujoActivo = null;
+    let paso        = 0;
+    let datos       = {};
+
+    let _bubbleTimer   = null;
+    let _trTimer       = null;
+    let _relistenTimer = null;
+    let _recInstance   = null;   // instancia activa (se recrea cada vez)
+
+    /* ─── ESTADO ─────────────────────────────────────── */
+    function setState(next) {
+        state = next;
+        _renderEstado(next);
+    }
+
+    /* ─── INIT (solo una vez) ────────────────────────── */
+    function init() {
+        SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { console.warn('DARA: SpeechRecognition no disponible'); return; }
+        _cargarVoz();
+        if (synth.onvoiceschanged !== undefined) synth.onvoiceschanged = _cargarVoz;
+        _renderUI();
+    }
+
+    /* ─── VOZ ────────────────────────────────────────── */
+    function _cargarVoz() {
+        const voces = synth.getVoices();
+        const pref  = ['Microsoft Sabina','Microsoft Laura','Microsoft Helena',
+                       'Google español','Paulina','Monica','Diego'];
+        for (const n of pref) {
+            const v = voces.find(v => v.name.includes(n) && v.lang.startsWith('es'));
+            if (v) { vozSel = v; return; }
         }
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        this.recognition = new SR();
-        this.recognition.lang = 'es-ES';
-        this.recognition.continuous = false;
-        this.recognition.interimResults = false;
+        vozSel = voces.find(v => v.lang.startsWith('es')) || null;
+    }
 
-        this.recognition.onresult = (e) => {
+    /* ─── CREAR INSTANCIA FRESCA ─────────────────────── */
+    function _newRecognition() {
+        // Destruir instancia anterior limpiamente
+        if (_recInstance) {
+            try { _recInstance.onresult = null; _recInstance.onend = null;
+                  _recInstance.onerror  = null; _recInstance.abort(); } catch(e) {}
+            _recInstance = null;
+        }
+
+        const rec = new SR();
+        rec.lang            = 'es-ES';
+        rec.continuous      = false;
+        rec.interimResults  = false;
+        rec.maxAlternatives = 1;
+
+        rec.onresult = (e) => {
             const texto = e.results[0][0].transcript.toLowerCase().trim();
-            this.mostrarTranscripcion(texto);
-            this.procesarInput(texto);
+            _mostrarTranscripcion(texto);
+            // Pasar a IDLE antes de procesar para que _hablar pueda arrancar
+            setState(STATE.IDLE);
+            _procesarInput(texto);
         };
 
-        this.recognition.onend = () => {
-            this.listening = false;
-            if (this.active) {
-                this.setEstado('idle');
-                if (this.conversacion) {
-                    setTimeout(() => this.escuchar(), 600);
-                } else {
-                    setTimeout(() => this.escuchar(), 400);
-                }
-            } else {
-                this.setEstado('off');
+        rec.onend = () => {
+            // Si seguimos en LISTENING es que no hubo resultado (silencio o corte)
+            if (state === STATE.LISTENING) {
+                setState(STATE.IDLE);
+                _scheduleRelisten(400);
             }
+            // Si ya pasamos a IDLE/SPEAKING (por onresult), no hacer nada aquí
         };
 
-        this.recognition.onerror = (e) => {
-            this.listening = false;
-            if (e.error === 'no-speech' && this.active) {
-                setTimeout(() => this.escuchar(), 400);
+        rec.onerror = (e) => {
+            if (e.error === 'no-speech') {
+                setState(STATE.IDLE);
+                _scheduleRelisten(350);
+            } else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+                setState(STATE.OFF);
+                _mostrarRespuesta('Sin permiso de micrófono. Revisa la configuración del navegador.');
             } else if (e.error !== 'aborted') {
-                this.setEstado('idle');
+                // network, audio-capture, etc. — reintentar después
+                setState(STATE.IDLE);
+                _scheduleRelisten(700);
             }
+            // 'aborted' = lo abortamos nosotros a propósito, ignorar
         };
 
-        // Cargar voces
-        this.cargarVoz();
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = () => this.cargarVoz();
-        }
+        _recInstance = rec;
+        return rec;
+    }
 
-        this.renderUI();
-    },
-
-    cargarVoz() {
-        const voces = this.synth.getVoices();
-        const preferidas = [
-            'Microsoft Sabina', 'Microsoft Laura', 'Microsoft Helena',
-            'Google español', 'Paulina', 'Monica', 'Diego'
-        ];
-        for (const nombre of preferidas) {
-            const voz = voces.find(v => v.name.includes(nombre) && v.lang.startsWith('es'));
-            if (voz) { this.vozSeleccionada = voz; break; }
-        }
-        if (!this.vozSeleccionada) {
-            this.vozSeleccionada = voces.find(v => v.lang.startsWith('es')) || null;
-        }
-    },
-
-    activar() {
-        this.active = true;
-        this.setEstado('idle');
-        this.mostrarRespuesta('Escuchando... di un comando.');
-        setTimeout(() => this.escuchar(), 300);
-        document.getElementById('dara-btn').classList.add('active');
-    },
-
-    desactivar() {
-        this.active = false;
-        this.conversacion = null;
-        this.paso = 0;
-        this.datos = {};
-        this.listening = false;
-        try { this.recognition.stop(); } catch(e) {}
-        this.synth.cancel();
-        this.setEstado('off');
-        document.getElementById('dara-btn').classList.remove('active');
-        this.mostrarRespuesta('DARA desactivada.');
-        setTimeout(() => {
-            const bubble = document.getElementById('dara-bubble');
-            if (bubble) bubble.classList.remove('show');
-        }, 2000);
-    },
-
-    escuchar() {
-        if (this.listening || !this.active) return;
+    /* ─── ESCUCHAR ───────────────────────────────────── */
+    function _escuchar() {
+        if (state !== STATE.IDLE) return;
+        clearTimeout(_relistenTimer);
+        const rec = _newRecognition();   // instancia fresca siempre
         try {
-            this.recognition.start();
-            this.listening = true;
-            this.setEstado('listening');
-        } catch(e) {}
-    },
+            rec.start();
+            setState(STATE.LISTENING);
+        } catch(e) {
+            setState(STATE.IDLE);
+            _scheduleRelisten(500);
+        }
+    }
 
-    hablar(texto, seguirEscuchando = true) {
-        this.synth.cancel();
-        const u = new SpeechSynthesisUtterance(texto);
-        u.lang = 'es-ES';
-        u.rate = 0.95;
-        u.pitch = 1.05;
-        if (this.vozSeleccionada) u.voice = this.vozSeleccionada;
-        this.setEstado('speaking');
-        this.mostrarRespuesta(texto);
+    function _scheduleRelisten(ms) {
+        clearTimeout(_relistenTimer);
+        if (state === STATE.OFF) return;
+        _relistenTimer = setTimeout(() => {
+            if (state === STATE.IDLE) _escuchar();
+        }, ms);
+    }
+
+    /* ─── HABLAR ─────────────────────────────────────── */
+    function _hablar(texto, callbackDespues = null) {
+        clearTimeout(_relistenTimer);
+        // Abortar recognition activo antes de hablar
+        if (_recInstance) {
+            try { _recInstance.abort(); } catch(e) {}
+        }
+        synth.cancel();
+        setState(STATE.SPEAKING);
+        _mostrarRespuesta(texto);
+
+        const u    = new SpeechSynthesisUtterance(texto);
+        u.lang     = 'es-ES';
+        u.rate     = 0.93;
+        u.pitch    = 1.05;
+        if (vozSel) u.voice = vozSel;
 
         u.onend = () => {
-            if (this.active && seguirEscuchando) {
-                this.setEstado('idle');
-                setTimeout(() => this.escuchar(), 400);
-            } else if (!seguirEscuchando) {
-                this.setEstado(this.active ? 'idle' : 'off');
-                if (this.active) setTimeout(() => this.escuchar(), 400);
-            }
+            if (state === STATE.OFF) return;
+            setState(STATE.IDLE);
+            if (callbackDespues) { callbackDespues(); return; }
+            _scheduleRelisten(500);
         };
-        this.synth.speak(u);
-    },
+        u.onerror = () => {
+            if (state === STATE.OFF) return;
+            setState(STATE.IDLE);
+            _scheduleRelisten(500);
+        };
 
-    procesarInput(texto) {
-        this.listening = false;
+        synth.speak(u);
+    }
 
-        if (this.conversacion) {
-            this.flujos[this.conversacion].call(this, texto);
+    /* ─── ACTIVAR / DESACTIVAR ───────────────────────── */
+    function activar() {
+        setState(STATE.IDLE);
+        document.getElementById('dara-btn')?.classList.add('active');
+        _hablar('Sistema DARA activo. Di un comando o "ayuda" para ver opciones.');
+    }
+
+    function desactivar() {
+        clearTimeout(_relistenTimer);
+        if (_recInstance) {
+            try { _recInstance.onresult = null; _recInstance.onend = null;
+                  _recInstance.onerror  = null; _recInstance.abort(); } catch(e) {}
+            _recInstance = null;
+        }
+        synth.cancel();
+        _terminarFlujo();
+        setState(STATE.OFF);
+        document.getElementById('dara-btn')?.classList.remove('active');
+        _mostrarRespuesta('DARA desactivada.');
+        setTimeout(() => document.getElementById('dara-bubble')?.classList.remove('show'), 2500);
+    }
+
+    /* ─── COMANDOS ───────────────────────────────────── */
+    function _procesarInput(texto) {
+        if (flujoActivo) { FLUJOS[flujoActivo](texto); return; }
+
+        if (/desactivar|cerrar|salir|apagar/.test(texto))               { desactivar(); return; }
+        if (/dashboard|inicio/.test(texto))                              { showSection('dashboard'); _hablar('Mostrando el dashboard.'); return; }
+        if (/inventario|monitoreo/.test(texto))                         { showSection('monitoring'); _hablar('Mostrando inventario.'); return; }
+        if (/pr[eé]stamos?\b(?!.*activo)/.test(texto))                  { showSection('loans'); _hablar('Mostrando préstamos.'); return; }
+        if (/historial/.test(texto))                                     { showSection('history'); _hablar('Mostrando historial.'); return; }
+        if (/reportes?/.test(texto))                                     { showSection('reports'); _hablar('Mostrando reportes.'); return; }
+        if (/notificaciones/.test(texto))                                { showSection('alexa'); _hablar('Mostrando notificaciones.'); return; }
+        if (/registrar|nuevo equipo|alta/.test(texto))                   { _iniciarFlujo('registrarEquipo'); return; }
+        if (/asignar/.test(texto))                                       { _iniciarFlujo('asignarEquipo'); return; }
+        if (/disponible/.test(texto))                                    { _iniciarFlujo('consultarDisponibles'); return; }
+        if (/pr[eé]stamos? activos?|en campo/.test(texto))              { _consultarPrestamosActivos(); return; }
+        if (/pendientes?|reporte pendiente/.test(texto))                 { _consultarReportesPendientes(); return; }
+        if (/ayuda|qu[eé] puedes/.test(texto)) {
+            _hablar('Puedo registrar equipos, asignar equipos, consultar disponibles, ver préstamos activos, reportes pendientes y navegar entre secciones. ¿Qué necesitas?');
             return;
         }
+        _hablar('No entendí ese comando. Di ayuda para ver qué puedo hacer.');
+    }
 
-        if (texto.includes('desactivar') || texto.includes('cerrar') || texto.includes('salir') || texto.includes('apagar')) {
-            this.desactivar();
-            return;
-        }
-        if (texto.includes('dashboard') || texto.includes('inicio')) {
-            showSection('dashboard'); this.hablar('Mostrando el dashboard.'); return;
-        }
-        if (texto.includes('inventario') || texto.includes('monitoreo')) {
-            showSection('monitoring'); this.hablar('Mostrando inventario.'); return;
-        }
-        if (texto.includes('préstamos') || texto.includes('prestamos')) {
-            showSection('loans'); this.hablar('Mostrando préstamos.'); return;
-        }
-        if (texto.includes('historial')) {
-            showSection('history'); this.hablar('Mostrando historial.'); return;
-        }
-        if (texto.includes('reporte') || texto.includes('reportes')) {
-            showSection('reports'); this.hablar('Mostrando reportes.'); return;
-        }
-        if (texto.includes('notificaciones')) {
-            showSection('alexa'); this.hablar('Mostrando notificaciones.'); return;
-        }
-        if (texto.includes('registrar') || texto.includes('nuevo equipo') || texto.includes('alta')) {
-            this.iniciarFlujo('registrarEquipo'); return;
-        }
-        if (texto.includes('asignar') || texto.includes('préstamo') || texto.includes('prestamo')) {
-            this.iniciarFlujo('asignarEquipo'); return;
-        }
-        if (texto.includes('disponible')) {
-            this.iniciarFlujo('consultarDisponibles'); return;
-        }
-        if (texto.includes('préstamos activos') || texto.includes('prestamos activos') || texto.includes('en campo')) {
-            this.consultarPrestamosActivos(); return;
-        }
-        if (texto.includes('pendiente') || texto.includes('reporte pendiente')) {
-            this.consultarReportesPendientes(); return;
-        }
-        if (texto.includes('ayuda') || texto.includes('qué puedes') || texto.includes('que puedes')) {
-            this.hablar('Puedo registrar equipos, asignar equipos, consultar disponibles por categoría, ver préstamos activos, reportes pendientes y navegar entre secciones. ¿Qué necesitas?');
-            return;
-        }
+    /* ─── FLUJOS ─────────────────────────────────────── */
+    function _iniciarFlujo(nombre) {
+        flujoActivo = nombre; paso = 0; datos = {};
+        FLUJOS[nombre](null);
+    }
+    function _terminarFlujo() {
+        flujoActivo = null; paso = 0; datos = {};
+    }
+    function _preguntar(texto) { paso++; _hablar(texto); }
 
-        this.hablar('No entendí ese comando. Di ayuda para ver qué puedo hacer.');
-    },
+    const FLUJOS = {
 
-    iniciarFlujo(nombre) {
-        this.conversacion = nombre;
-        this.paso = 0;
-        this.datos = {};
-        this.flujos[nombre].call(this, null);
-    },
-
-    terminarFlujo() {
-        this.conversacion = null;
-        this.paso = 0;
-        this.datos = {};
-    },
-
-    flujos: {
         registrarEquipo(input) {
-            const pasos = [
-                () => {
-                    showSection('monitoring');
-                    this.hablar('Vamos a registrar un nuevo equipo. ¿Cuál es el tipo? Laptop, Monitor, Mouse, Teclado, CPU, Audífonos, Tablet o Impresora.');
-                },
-                (input) => {
-                    const tipos = {
-                        'laptop': 'Laptop', 'monitor': 'Monitor', 'mouse': 'Mouse',
-                        'teclado': 'Teclado', 'cpu': 'CPU', 'audifonos': 'Audífonos',
-                        'audífonos': 'Audífonos', 'tablet': 'Tablet', 'impresora': 'Impresora'
-                    };
-                    const tipo = Object.keys(tipos).find(t => input.includes(t));
-                    if (!tipo) { this.hablar('No reconocí ese tipo. Di Laptop, Monitor, Mouse, Teclado o CPU.'); return; }
-                    this.datos.tipo = tipos[tipo];
-                    this.hablar('Tipo ' + this.datos.tipo + ' registrado. ¿Cuál es la marca?');
-                    this.paso++;
-                },
-                (input) => {
-                    this.datos.marca = this.capitalizar(input.replace(/[^a-záéíóúüñ\s]/gi, '').trim());
-                    this.hablar('Marca ' + this.datos.marca + '. ¿Cuál es el modelo?');
-                    this.paso++;
-                },
-                (input) => {
-                    this.datos.modelo = this.capitalizar(input.trim());
-                    this.hablar('Modelo ' + this.datos.modelo + '. ¿Cómo se llama descriptivamente este equipo?');
-                    this.paso++;
-                },
-                (input) => {
-                    this.datos.nombre = this.capitalizar(input.trim());
-                    this.hablar('Listo. Voy a registrar un ' + this.datos.tipo + ' ' + this.datos.marca + ' ' + this.datos.modelo + '. ¿Confirmas? Di sí o no.');
-                    this.paso++;
-                },
-                (input) => {
-                    if (input.includes('sí') || input.includes('si') || input.includes('confirmo') || input.includes('correcto')) {
-                        const prefijos = { Laptop: 'LAP', Monitor: 'MON', Mouse: 'MOU', Teclado: 'KEY', CPU: 'CPU', 'Audífonos': 'AUD', Tablet: 'TAB', Impresora: 'IMP', Otro: 'EQ' };
-                        const prefix = prefijos[this.datos.tipo] || 'EQ';
-                        const mismoTipo = dbBase.equipos.filter(e => e.id.startsWith(prefix));
-                        const newId = nextId(prefix, mismoTipo);
-                        const hoy = new Date().toISOString().split('T')[0];
-
-                        dbBase.equipos.push({ id: newId, nombre: this.datos.nombre, marca: this.datos.marca, modelo: this.datos.modelo, tipo: this.datos.tipo, serie: '' });
-                        dbBase.eventos.push({ id: nextId('EVT', dbBase.eventos), equipoId: newId, tipo: 'alta', fecha: hoy, usuario: '', area: 'Almacén', notas: 'Alta por DARA' });
-                        saveDB();
-                        if (typeof syncDashboard === 'function') syncDashboard();
-                        if (typeof renderInventory === 'function') renderInventory();
-
-                        this.terminarFlujo();
-                        this.hablar('Equipo ' + newId + ' registrado exitosamente.', false);
-                        setTimeout(() => openQrModal(newId), 2500);
-                    } else {
-                        this.terminarFlujo();
-                        this.hablar('Registro cancelado.', false);
-                    }
+            const TIPOS = { laptop:'Laptop', monitor:'Monitor', mouse:'Mouse', teclado:'Teclado',
+                            cpu:'CPU', 'audífonos':'Audífonos', audifonos:'Audífonos',
+                            tablet:'Tablet', impresora:'Impresora' };
+            if (input === null) {
+                showSection('monitoring');
+                _hablar('Vamos a registrar un nuevo equipo. ¿Cuál es el tipo? Laptop, Monitor, Mouse, Teclado, CPU, Audífonos, Tablet o Impresora.');
+                paso = 1; return;
+            }
+            switch (paso) {
+                case 1: {
+                    const key = Object.keys(TIPOS).find(t => input.includes(t));
+                    if (!key) { _hablar('No reconocí ese tipo. Di Laptop, Monitor, Mouse, Teclado o CPU.'); return; }
+                    datos.tipo = TIPOS[key];
+                    _preguntar(`Tipo ${datos.tipo} registrado. ¿Cuál es la marca?`); break;
                 }
-            ];
-            if (input === null) { pasos[0].call(this); this.paso = 1; return; }
-            if (this.paso < pasos.length) pasos[this.paso].call(this, input);
+                case 2:
+                    datos.marca = _cap(input.replace(/[^a-záéíóúüñ\s]/gi,'').trim());
+                    _preguntar(`Marca ${datos.marca}. ¿Cuál es el modelo?`); break;
+                case 3:
+                    datos.modelo = _cap(input.trim());
+                    _preguntar(`Modelo ${datos.modelo}. ¿Cómo se llama descriptivamente este equipo?`); break;
+                case 4:
+                    datos.nombre = _cap(input.trim());
+                    _preguntar(`Listo. Voy a registrar un ${datos.tipo} ${datos.marca} ${datos.modelo}. ¿Confirmas? Di sí o no.`); break;
+                case 5: {
+                    if (/s[ií]|confirmo|correcto/.test(input)) {
+                        const PREF = { Laptop:'LAP', Monitor:'MON', Mouse:'MOU', Teclado:'KEY',
+                                       CPU:'CPU', 'Audífonos':'AUD', Tablet:'TAB', Impresora:'IMP' };
+                        const prefix = PREF[datos.tipo] || 'EQ';
+                        const mismo  = dbBase.equipos.filter(e => e.id.startsWith(prefix));
+                        const newId  = nextId(prefix, mismo);
+                        const hoy    = new Date().toISOString().split('T')[0];
+                        dbBase.equipos.push({ id:newId, nombre:datos.nombre, marca:datos.marca,
+                            modelo:datos.modelo, tipo:datos.tipo, serie:'' });
+                        dbBase.eventos.push({ id:nextId('EVT',dbBase.eventos), equipoId:newId,
+                            tipo:'alta', fecha:hoy, usuario:'', area:'Almacén', notas:'Alta por DARA' });
+                        saveDB();
+                        if (typeof syncDashboard  === 'function') syncDashboard();
+                        if (typeof renderInventory === 'function') renderInventory();
+                        _terminarFlujo();
+                        _hablar(`Equipo ${newId} registrado exitosamente.`, () => openQrModal(newId));
+                    } else {
+                        _terminarFlujo();
+                        _hablar('Registro cancelado. ¿En qué más puedo ayudarte?');
+                    }
+                    break;
+                }
+            }
         },
 
         asignarEquipo(input) {
-            const pasos = [
-                () => {
-                    showSection('loans');
-                    const disponibles = dbBase.equipos.filter(eq => getEstado(eq.id).estado === 'Disponible');
-                    if (!disponibles.length) {
-                        this.terminarFlujo();
-                        this.hablar('No hay equipos disponibles en este momento.', false);
-                        return;
-                    }
-                    const lista = disponibles.slice(0, 5).map(e => e.id).join(', ');
-                    this.hablar('Disponibles: ' + lista + '. ¿Cuál deseas asignar?');
-                    this.paso = 1;
-                },
-                (input) => {
+            if (input === null) {
+                showSection('loans');
+                const disp = dbBase.equipos.filter(eq => getEstado(eq.id).estado === 'Disponible');
+                if (!disp.length) { _terminarFlujo(); _hablar('No hay equipos disponibles en este momento.'); return; }
+                const lista = disp.slice(0,5).map(e => e.id).join(', ');
+                _hablar(`Equipos disponibles: ${lista}. ¿Cuál deseas asignar?`);
+                paso = 1; return;
+            }
+            switch (paso) {
+                case 1: {
                     const eq = dbBase.equipos.find(e => input.toUpperCase().includes(e.id));
-                    if (!eq) { this.hablar('No encontré ese equipo. Di el identificador, por ejemplo LAP-001.'); return; }
-                    if (getEstado(eq.id).estado !== 'Disponible') { this.hablar('Ese equipo no está disponible.'); return; }
-                    this.datos.equipo = eq;
-                    this.hablar('Equipo ' + eq.id + ' seleccionado. ¿A qué empleado lo asignamos?');
-                    this.paso++;
-                },
-                (input) => {
-                    this.datos.empleado = this.capitalizar(input.trim());
-                    this.hablar('Empleado ' + this.datos.empleado + '. ¿En qué área trabaja?');
-                    this.paso++;
-                },
-                (input) => {
-                    this.datos.area = this.capitalizar(input.trim());
-                    this.hablar('Asignando ' + this.datos.equipo.id + ' a ' + this.datos.empleado + ' del área ' + this.datos.area + '. ¿Confirmas?');
-                    this.paso++;
-                },
-                (input) => {
-                    if (input.includes('sí') || input.includes('si') || input.includes('confirmo') || input.includes('correcto')) {
-                        const eq = this.datos.equipo;
-                        const hoy = new Date().toISOString().split('T')[0];
-                        dbBase.eventos.push({ id: nextId('EVT', dbBase.eventos), equipoId: eq.id, tipo: 'asignacion', fecha: hoy, usuario: this.datos.empleado, area: this.datos.area, notas: 'Asignado por DARA' });
-                        saveDB();
-                        loans.push({ id: 'LN-' + Date.now(), equipmentId: eq.id, employee: this.datos.empleado, warehousePerson: 'DARA', conditionOut: 'Bueno', conditionIn: '', durationValue: null, durationUnit: 'indefinido', startDate: hoy, returnDate: '', status: 'Activo', notes: 'Asignado por voz', area: this.datos.area });
-                        notifications.unshift({ id: 'NT-' + Date.now(), type: 'Préstamo', message: 'Asignación por DARA: ' + eq.id + ' a ' + this.datos.empleado, date: new Date().toLocaleString('es-ES'), read: false });
-                        saveData();
-                        if (typeof renderTables === 'function') renderTables();
-                        if (typeof syncDashboard === 'function') syncDashboard();
-                        this.terminarFlujo();
-                        this.hablar(eq.id + ' asignado a ' + this.datos.empleado + ' exitosamente.', false);
-                    } else {
-                        this.terminarFlujo();
-                        this.hablar('Asignación cancelada.', false);
-                    }
+                    if (!eq) { _hablar('No encontré ese equipo. Di el identificador, por ejemplo LAP-001.'); return; }
+                    if (getEstado(eq.id).estado !== 'Disponible') { _hablar('Ese equipo no está disponible actualmente.'); return; }
+                    datos.equipo = eq;
+                    _preguntar(`Equipo ${eq.id} seleccionado. ¿A qué colaborador lo asignamos?`); break;
                 }
-            ];
-            if (input === null) { pasos[0].call(this); return; }
-            if (this.paso < pasos.length) pasos[this.paso].call(this, input);
+                case 2:
+                    datos.empleado = _cap(input.trim());
+                    _preguntar(`Colaborador ${datos.empleado}. ¿En qué área trabaja?`); break;
+                case 3:
+                    datos.area = _cap(input.trim());
+                    _preguntar(`Asignando ${datos.equipo.id} a ${datos.empleado} del área ${datos.area}. ¿Confirmas?`); break;
+                case 4: {
+                    if (/s[ií]|confirmo|correcto/.test(input)) {
+                        const hoy = new Date().toISOString().split('T')[0];
+                        dbBase.eventos.push({ id:nextId('EVT',dbBase.eventos), equipoId:datos.equipo.id,
+                            tipo:'asignacion', fecha:hoy, usuario:datos.empleado, area:datos.area,
+                            notas:'Asignado por DARA' });
+                        saveDB();
+                        loans.push({ id:'LN-'+Date.now(), equipmentId:datos.equipo.id,
+                            employee:datos.empleado, warehousePerson:'DARA', conditionOut:'Bueno',
+                            conditionIn:'', durationValue:null, durationUnit:'indefinido',
+                            startDate:hoy, returnDate:'', status:'Activo',
+                            notes:'Asignado por voz', area:datos.area });
+                        notifications.unshift({ id:'NT-'+Date.now(), type:'Préstamo',
+                            message:`Asignación por DARA: ${datos.equipo.id} a ${datos.empleado}`,
+                            date:new Date().toLocaleString('es-MX'), read:false });
+                        saveData();
+                        if (typeof renderTables  === 'function') renderTables();
+                        if (typeof syncDashboard === 'function') syncDashboard();
+                        _terminarFlujo();
+                        _hablar(`${datos.equipo.id} asignado a ${datos.empleado} exitosamente. ¿Algo más?`);
+                    } else {
+                        _terminarFlujo();
+                        _hablar('Asignación cancelada. ¿En qué más puedo ayudarte?');
+                    }
+                    break;
+                }
+            }
         },
 
         consultarDisponibles(input) {
-            const pasos = [
-                () => {
-                    this.hablar('¿De qué categoría? Laptop, Monitor, Mouse, Teclado, CPU o todos.');
-                    this.paso = 1;
-                },
-                (input) => {
-                    const tipos = { 'laptop': 'Laptop', 'monitor': 'Monitor', 'mouse': 'Mouse', 'teclado': 'Teclado', 'cpu': 'CPU', 'audifonos': 'Audífonos', 'audífonos': 'Audífonos', 'tablet': 'Tablet', 'todos': null, 'todo': null };
-                    const key = Object.keys(tipos).find(t => input.includes(t));
-                    if (!key) { this.hablar('No reconocí esa categoría. Di Laptop, Monitor, Mouse, Teclado, CPU o todos.'); return; }
-                    const tipoBuscado = tipos[key];
-
-                    const disp = dbBase.equipos.filter(eq => getEstado(eq.id).estado === 'Disponible' && (tipoBuscado === null || eq.tipo === tipoBuscado));
-                    const asig = dbBase.equipos.filter(eq => getEstado(eq.id).estado === 'Asignado' && (tipoBuscado === null || eq.tipo === tipoBuscado));
-                    const mant = dbBase.equipos.filter(eq => getEstado(eq.id).estado === 'En Mantenimiento' && (tipoBuscado === null || eq.tipo === tipoBuscado));
-
-                    let r = tipoBuscado ? ('Para ' + tipoBuscado + ': ') : 'En total: ';
-                    r += disp.length + ' disponibles';
-                    if (asig.length) r += ', ' + asig.length + ' asignados';
-                    if (mant.length) r += ', ' + mant.length + ' en mantenimiento';
-                    if (disp.length) r += '. Los disponibles son: ' + disp.map(e => e.id).join(', ');
-
-                    this.terminarFlujo();
-                    this.hablar(r, false);
-                }
-            ];
-            if (input === null) { pasos[0].call(this); return; }
-            if (this.paso < pasos.length) pasos[this.paso].call(this, input);
+            if (input === null) {
+                _hablar('¿De qué categoría? Laptop, Monitor, Mouse, Teclado, CPU o todos.');
+                paso = 1; return;
+            }
+            const TIPOS = { laptop:'Laptop', monitor:'Monitor', mouse:'Mouse', teclado:'Teclado',
+                            cpu:'CPU', audifonos:'Audífonos', 'audífonos':'Audífonos',
+                            tablet:'Tablet', todos:null, todo:null };
+            const key  = Object.keys(TIPOS).find(t => input.includes(t));
+            if (!key) { _hablar('No reconocí esa categoría. Di Laptop, Monitor o todos.'); return; }
+            const tipo = TIPOS[key];
+            const fil  = eq => !tipo || eq.tipo === tipo;
+            const disp = dbBase.equipos.filter(eq => getEstado(eq.id).estado === 'Disponible'       && fil(eq));
+            const asig = dbBase.equipos.filter(eq => getEstado(eq.id).estado === 'Asignado'         && fil(eq));
+            const mant = dbBase.equipos.filter(eq => getEstado(eq.id).estado === 'En Mantenimiento' && fil(eq));
+            let r = tipo ? `Para ${tipo}: ` : 'En total: ';
+            r += `${disp.length} disponible${disp.length !== 1 ? 's' : ''}`;
+            if (asig.length) r += `, ${asig.length} asignado${asig.length !== 1 ? 's' : ''}`;
+            if (mant.length) r += `, ${mant.length} en mantenimiento`;
+            if (disp.length) r += `. Disponibles: ${disp.map(e => e.id).join(', ')}`;
+            _terminarFlujo();
+            _hablar(r);
         }
-    },
+    };
 
-    consultarPrestamosActivos() {
+    function _consultarPrestamosActivos() {
         const activos = loans.filter(l => l.status === 'Activo');
-        if (!activos.length) { this.hablar('No hay préstamos activos.', false); return; }
-        const lista = activos.slice(0, 4).map(l => l.equipmentId + ' con ' + l.employee).join('. ');
-        this.hablar('Hay ' + activos.length + ' préstamos activos. ' + lista, false);
-    },
+        if (!activos.length) { _hablar('No hay préstamos activos en este momento.'); return; }
+        const lista = activos.slice(0,4).map(l => `${l.equipmentId} con ${l.employee}`).join(', ');
+        _hablar(`Hay ${activos.length} préstamo${activos.length !== 1 ? 's' : ''} activo${activos.length !== 1 ? 's' : ''}: ${lista}.`);
+    }
 
-    consultarReportesPendientes() {
+    function _consultarReportesPendientes() {
         const pend = reports.filter(r => r.status === 'Pendiente');
-        if (!pend.length) { this.hablar('No hay reportes pendientes.', false); return; }
-        const lista = pend.slice(0, 3).map(r => r.equipmentId + ' por ' + r.reporter).join('. ');
-        this.hablar('Hay ' + pend.length + ' reportes pendientes. ' + lista, false);
-    },
+        if (!pend.length) { _hablar('No hay reportes pendientes.'); return; }
+        const lista = pend.slice(0,3).map(r => `${r.equipmentId} por ${r.reporter}`).join(', ');
+        _hablar(`Hay ${pend.length} reporte${pend.length !== 1 ? 's' : ''} pendiente${pend.length !== 1 ? 's' : ''}: ${lista}.`);
+    }
 
-    renderUI() {
+    function _cap(str) { return str ? str.charAt(0).toUpperCase() + str.slice(1) : str; }
+
+    /* ─── UI ─────────────────────────────────────────── */
+    function _renderUI() {
         const el = document.createElement('div');
         el.id = 'dara-widget';
         el.innerHTML = `
         <style>
             #dara-widget {
-                position: fixed;
-                bottom: 28px;
-                right: 28px;
-                z-index: 9999;
-                display: flex;
-                flex-direction: column;
-                align-items: flex-end;
-                gap: 8px;
-                font-family: 'Inter', sans-serif;
+                position:fixed; bottom:28px; right:28px; z-index:9999;
+                display:flex; flex-direction:column; align-items:flex-end; gap:10px;
+                font-family:'Inter',sans-serif;
             }
             #dara-transcript {
-                background: #EFF6FF;
-                border: 1px solid #BFDBFE;
-                border-radius: 12px 12px 12px 4px;
-                padding: 7px 12px;
-                max-width: 260px;
-                font-size: 11px;
-                color: #1D4ED8;
-                font-style: italic;
-                display: none;
-                animation: dara-fadein .2s ease;
+                background:#EFF6FF; border:1px solid #BFDBFE;
+                border-radius:12px 12px 12px 4px; padding:7px 12px;
+                max-width:270px; font-size:11px; color:#1D4ED8; font-style:italic;
+                opacity:0; transform:translateY(4px); transition:opacity .2s,transform .2s;
+                pointer-events:none;
             }
-            #dara-transcript.show { display: block; }
+            #dara-transcript.show { opacity:1; transform:none; }
             #dara-bubble {
-                background: #fff;
-                border: 1px solid #E2E8F0;
-                border-radius: 14px 14px 4px 14px;
-                padding: 11px 14px;
-                max-width: 260px;
-                font-size: 12px;
-                color: #334155;
-                box-shadow: 0 6px 20px rgba(0,31,63,.1);
-                display: none;
-                line-height: 1.5;
-                animation: dara-fadein .2s ease;
+                background:#fff; border:1px solid #E2E8F0;
+                border-radius:14px 14px 4px 14px; padding:12px 15px;
+                max-width:270px; font-size:12.5px; color:#334155;
+                box-shadow:0 8px 24px rgba(0,31,63,.12); line-height:1.55;
+                opacity:0; transform:translateY(4px); transition:opacity .25s,transform .25s;
+                pointer-events:none;
             }
-            #dara-bubble.show { display: block; }
+            #dara-bubble.show { opacity:1; transform:none; }
             #dara-bubble-label {
-                font-size: 9px;
-                font-weight: 800;
-                color: #001f3f;
-                letter-spacing: 1.5px;
-                margin-bottom: 4px;
-                display: block;
+                font-size:9px; font-weight:800; color:#001f3f;
+                letter-spacing:1.5px; margin-bottom:5px; display:block;
             }
             #dara-btn {
-                width: 56px;
-                height: 56px;
-                border-radius: 50%;
-                background: #001f3f;
-                border: 3px solid rgba(255,255,255,.15);
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                box-shadow: 0 4px 16px rgba(0,31,63,.4);
-                transition: all .25s;
-                position: relative;
-                outline: none;
+                width:58px; height:58px; border-radius:50%;
+                background:#001f3f; border:3px solid rgba(255,255,255,.15);
+                cursor:pointer; display:flex; align-items:center; justify-content:center;
+                box-shadow:0 4px 18px rgba(0,31,63,.45); transition:transform .2s,box-shadow .2s;
+                position:relative; outline:none; padding:0;
             }
-            #dara-btn:hover { transform: scale(1.08); box-shadow: 0 6px 24px rgba(0,31,63,.5); }
-            #dara-btn.active { border-color: rgba(255,255,255,.4); }
-            #dara-btn.listening { background: #DC2626; animation: dara-pulse 1s ease-in-out infinite; }
-            #dara-btn.speaking { background: #059669; animation: dara-pulse 1.4s ease-in-out infinite; }
+            #dara-btn:hover { transform:scale(1.07); box-shadow:0 6px 26px rgba(0,31,63,.55); }
+            #dara-btn.active    { border-color:rgba(255,255,255,.35); }
+            #dara-btn.listening { background:#DC2626; }
+            #dara-btn.speaking  { background:#059669; }
             #dara-name {
-                position: absolute;
-                top: -9px;
-                left: 50%;
-                transform: translateX(-50%);
-                background: #001f3f;
-                color: #fff;
-                font-size: 8px;
-                font-weight: 800;
-                letter-spacing: 2px;
-                padding: 2px 7px;
-                border-radius: 5px;
-                white-space: nowrap;
-                border: 1px solid rgba(255,255,255,.2);
+                position:absolute; top:-10px; left:50%; transform:translateX(-50%);
+                background:#001f3f; color:#fff; font-size:8px; font-weight:800;
+                letter-spacing:2px; padding:2px 8px; border-radius:5px;
+                white-space:nowrap; border:1px solid rgba(255,255,255,.2);
             }
-            #dara-icon { font-size: 20px; line-height: 1; }
-            #dara-waves {
-                position: absolute;
-                inset: -4px;
-                border-radius: 50%;
-                border: 2px solid rgba(255,255,255,.3);
-                display: none;
-                animation: dara-wave 1.2s ease-out infinite;
+            #dara-icon { font-size:22px; line-height:1; user-select:none; }
+            #dara-waves, #dara-pulse-ring {
+                position:absolute; inset:-5px; border-radius:50%;
+                border:2px solid rgba(255,255,255,.35); opacity:0;
+                animation:dara-wave 1.3s ease-out infinite;
             }
-            #dara-btn.listening #dara-waves,
-            #dara-btn.speaking #dara-waves { display: block; }
-            @keyframes dara-pulse {
-                0%,100% { box-shadow: 0 4px 16px rgba(0,31,63,.4); }
-                50% { box-shadow: 0 4px 28px rgba(0,31,63,.6), 0 0 0 6px rgba(0,31,63,.08); }
-            }
+            #dara-pulse-ring { animation-delay:.45s; }
+            #dara-btn.listening #dara-waves, #dara-btn.speaking #dara-waves,
+            #dara-btn.listening #dara-pulse-ring, #dara-btn.speaking #dara-pulse-ring { opacity:1; }
             @keyframes dara-wave {
-                0% { transform: scale(1); opacity: .6; }
-                100% { transform: scale(1.5); opacity: 0; }
-            }
-            @keyframes dara-fadein {
-                from { opacity: 0; transform: translateY(4px); }
-                to { opacity: 1; transform: none; }
+                0%   { transform:scale(1); opacity:.55; }
+                100% { transform:scale(1.65); opacity:0; }
             }
         </style>
-
         <div id="dara-transcript"></div>
         <div id="dara-bubble">
-            <span id="dara-bubble-label">DARA</span>
+            <span id="dara-bubble-label">DARA · ADMIN</span>
             <span id="dara-text">Presiona para activarme</span>
         </div>
         <button id="dara-btn" title="Activar / Desactivar DARA">
             <div id="dara-name">DARA</div>
             <div id="dara-waves"></div>
+            <div id="dara-pulse-ring"></div>
             <span id="dara-icon">🤖</span>
         </button>`;
-
         document.body.appendChild(el);
+        document.getElementById('dara-btn').onclick = () =>
+            state === STATE.OFF ? activar() : desactivar();
+        setTimeout(() => _mostrarRespuesta('Presiona para activarme'), 1500);
+    }
 
-        document.getElementById('dara-btn').onclick = () => {
-            if (this.active) {
-                this.desactivar();
-            } else {
-                this.activar();
-            }
-        };
-
-        // Mostrar burbuja de bienvenida sin voz
-        setTimeout(() => {
-            this.mostrarRespuesta('Presiona para activarme');
-        }, 1500);
-    },
-
-    setEstado(estado) {
-        const btn = document.getElementById('dara-btn');
+    function _renderEstado(s) {
+        const btn  = document.getElementById('dara-btn');
         const icon = document.getElementById('dara-icon');
         if (!btn) return;
         btn.className = '';
-        if (estado === 'listening') { btn.classList.add('listening'); icon.textContent = '👂'; }
-        else if (estado === 'speaking') { btn.classList.add('speaking'); icon.textContent = '💬'; }
-        else if (estado === 'off') { icon.textContent = '🤖'; }
-        else { if (this.active) btn.classList.add('active'); icon.textContent = '🎙️'; }
-    },
+        switch (s) {
+            case STATE.LISTENING: btn.classList.add('listening'); icon.textContent = '👂'; break;
+            case STATE.SPEAKING:  btn.classList.add('speaking');  icon.textContent = '💬'; break;
+            case STATE.IDLE:      btn.classList.add('active');    icon.textContent = '🎙️'; break;
+            case STATE.OFF:                                        icon.textContent = '🤖'; break;
+        }
+    }
 
-    mostrarRespuesta(texto) {
+    function _mostrarRespuesta(texto) {
         const bubble = document.getElementById('dara-bubble');
-        const t = document.getElementById('dara-text');
+        const t      = document.getElementById('dara-text');
         if (!bubble || !t) return;
         t.textContent = texto;
         bubble.classList.add('show');
-        clearTimeout(this._bubbleTimer);
-        this._bubbleTimer = setTimeout(() => bubble.classList.remove('show'), 7000);
-    },
+        clearTimeout(_bubbleTimer);
+        _bubbleTimer = setTimeout(() => bubble.classList.remove('show'), 7500);
+    }
 
-    mostrarTranscripcion(texto) {
+    function _mostrarTranscripcion(texto) {
         const tr = document.getElementById('dara-transcript');
         if (!tr) return;
-        tr.textContent = '"' + texto + '"';
+        tr.textContent = `"${texto}"`;
         tr.classList.add('show');
-        clearTimeout(this._trTimer);
-        this._trTimer = setTimeout(() => tr.classList.remove('show'), 3500);
-    },
-
-    capitalizar(str) {
-        return str.charAt(0).toUpperCase() + str.slice(1);
+        clearTimeout(_trTimer);
+        _trTimer = setTimeout(() => tr.classList.remove('show'), 3500);
     }
-};
 
-if (document.readyState === 'loading') {
+    return { init, activar, desactivar };
+
+})();
+
+if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', () => DARA.init());
-} else {
+else
     DARA.init();
-}

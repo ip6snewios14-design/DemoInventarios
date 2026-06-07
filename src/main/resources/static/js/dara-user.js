@@ -1,633 +1,489 @@
-const DARA_USER = {
-    recognition: null,
-    synth: window.speechSynthesis,
-    listening: false,
-    active: false,
-    conversacion: null,
-    paso: 0,
-    datos: {},
-    vozSeleccionada: null,
+/**
+ * DARA USER — Asistente de voz (Colaborador)
+ * Fix principal: recognition se recrea en cada ciclo de escucha.
+ */
 
-    init() {
-        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-            console.warn('DARA: SpeechRecognition no disponible');
-            return;
+const DARA_USER = (() => {
+
+    const STATE = { OFF:'off', IDLE:'idle', LISTENING:'listening', SPEAKING:'speaking' };
+    let state  = STATE.OFF;
+    let synth  = window.speechSynthesis;
+    let vozSel = null;
+    let SR     = null;
+
+    let flujoActivo = null;
+    let paso        = 0;
+    let datos       = {};
+
+    let _bubbleTimer   = null;
+    let _trTimer       = null;
+    let _relistenTimer = null;
+    let _recInstance   = null;
+
+    function setState(next) { state = next; _renderEstado(next); }
+
+    /* ─── INIT ───────────────────────────────────────── */
+    function init() {
+        SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { console.warn('DARA USER: SpeechRecognition no disponible'); return; }
+        _cargarVoz();
+        if (synth.onvoiceschanged !== undefined) synth.onvoiceschanged = _cargarVoz;
+        _renderUI();
+    }
+
+    function _cargarVoz() {
+        const voces = synth.getVoices();
+        const pref  = ['Microsoft Sabina','Microsoft Laura','Microsoft Helena',
+                       'Google español','Paulina','Monica'];
+        for (const n of pref) {
+            const v = voces.find(v => v.name.includes(n) && v.lang.startsWith('es'));
+            if (v) { vozSel = v; return; }
         }
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        this.recognition = new SR();
-        this.recognition.lang = 'es-ES';
-        this.recognition.continuous = false;
-        this.recognition.interimResults = false;
+        vozSel = voces.find(v => v.lang.startsWith('es')) || null;
+    }
 
-        this.recognition.onresult = (e) => {
+    /* ─── CREAR INSTANCIA FRESCA ─────────────────────── */
+    function _newRecognition() {
+        if (_recInstance) {
+            try { _recInstance.onresult = null; _recInstance.onend = null;
+                  _recInstance.onerror  = null; _recInstance.abort(); } catch(e) {}
+            _recInstance = null;
+        }
+        const rec = new SR();
+        rec.lang            = 'es-ES';
+        rec.continuous      = false;
+        rec.interimResults  = false;
+        rec.maxAlternatives = 1;
+
+        rec.onresult = (e) => {
             const texto = e.results[0][0].transcript.toLowerCase().trim();
-            this.mostrarTranscripcion(texto);
-            this.procesarInput(texto);
+            _mostrarTranscripcion(texto);
+            setState(STATE.IDLE);
+            _procesarInput(texto);
         };
 
-        this.recognition.onend = () => {
-            this.listening = false;
-            if (this.active) {
-                this.setEstado('idle');
-                setTimeout(() => this.escuchar(), this.conversacion ? 600 : 400);
-            } else {
-                this.setEstado('off');
+        rec.onend = () => {
+            if (state === STATE.LISTENING) {
+                setState(STATE.IDLE);
+                _scheduleRelisten(400);
             }
         };
 
-        this.recognition.onerror = (e) => {
-            this.listening = false;
-            if (e.error === 'no-speech' && this.active) {
-                setTimeout(() => this.escuchar(), 400);
+        rec.onerror = (e) => {
+            if (e.error === 'no-speech') {
+                setState(STATE.IDLE);
+                _scheduleRelisten(350);
+            } else if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+                setState(STATE.OFF);
+                _mostrarRespuesta('Sin permiso de micrófono.');
             } else if (e.error !== 'aborted') {
-                this.setEstado('idle');
+                setState(STATE.IDLE);
+                _scheduleRelisten(700);
             }
         };
 
-        this.cargarVoz();
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = () => this.cargarVoz();
+        _recInstance = rec;
+        return rec;
+    }
+
+    /* ─── ESCUCHAR / HABLAR ──────────────────────────── */
+    function _escuchar() {
+        if (state !== STATE.IDLE) return;
+        clearTimeout(_relistenTimer);
+        const rec = _newRecognition();
+        try { rec.start(); setState(STATE.LISTENING); }
+        catch(e) { setState(STATE.IDLE); _scheduleRelisten(500); }
+    }
+
+    function _scheduleRelisten(ms) {
+        clearTimeout(_relistenTimer);
+        if (state === STATE.OFF) return;
+        _relistenTimer = setTimeout(() => { if (state === STATE.IDLE) _escuchar(); }, ms);
+    }
+
+    function _hablar(texto, callbackDespues = null) {
+        clearTimeout(_relistenTimer);
+        if (_recInstance) {
+            try { _recInstance.abort(); } catch(e) {}
         }
+        synth.cancel();
+        setState(STATE.SPEAKING);
+        _mostrarRespuesta(texto);
 
-        this.renderUI();
-    },
-
-    cargarVoz() {
-        const voces = this.synth.getVoices();
-        const preferidas = ['Microsoft Sabina', 'Microsoft Laura', 'Microsoft Helena', 'Google español', 'Paulina', 'Monica'];
-        for (const nombre of preferidas) {
-            const voz = voces.find(v => v.name.includes(nombre) && v.lang.startsWith('es'));
-            if (voz) { this.vozSeleccionada = voz; break; }
-        }
-        if (!this.vozSeleccionada) {
-            this.vozSeleccionada = voces.find(v => v.lang.startsWith('es')) || null;
-        }
-    },
-
-    activar() {
-        this.active = true;
-        this.setEstado('idle');
-        const perfil = getPerfil();
-        this.mostrarRespuesta('Hola ' + perfil.nombre.split(' ')[0] + ', estoy lista.');
-        this.hablar('Hola ' + perfil.nombre.split(' ')[0] + ', estoy lista. Puedes pedirme ver tus equipos, reportar un problema, solicitar un equipo o revisar tus reportes.');
-        document.getElementById('dara-user-btn').classList.add('active');
-    },
-
-    desactivar() {
-        this.active = false;
-        this.conversacion = null;
-        this.paso = 0;
-        this.datos = {};
-        this.listening = false;
-        try { this.recognition.stop(); } catch(e) {}
-        this.synth.cancel();
-        this.setEstado('off');
-        document.getElementById('dara-user-btn').classList.remove('active');
-        this.mostrarRespuesta('DARA desactivada.');
-        setTimeout(() => {
-            const bubble = document.getElementById('dara-user-bubble');
-            if (bubble) bubble.classList.remove('show');
-        }, 2000);
-    },
-
-    escuchar() {
-        if (this.listening || !this.active) return;
-        try {
-            this.recognition.start();
-            this.listening = true;
-            this.setEstado('listening');
-        } catch(e) {}
-    },
-
-    hablar(texto, seguirEscuchando = true) {
-        this.synth.cancel();
         const u = new SpeechSynthesisUtterance(texto);
-        u.lang = 'es-ES';
-        u.rate = 0.95;
-        u.pitch = 1.05;
-        if (this.vozSeleccionada) u.voice = this.vozSeleccionada;
-        this.setEstado('speaking');
-        this.mostrarRespuesta(texto);
+        u.lang  = 'es-ES'; u.rate = 0.93; u.pitch = 1.05;
+        if (vozSel) u.voice = vozSel;
 
         u.onend = () => {
-            if (this.active && seguirEscuchando) {
-                this.setEstado('idle');
-                setTimeout(() => this.escuchar(), 400);
-            } else {
-                this.setEstado(this.active ? 'idle' : 'off');
-                if (this.active) setTimeout(() => this.escuchar(), 400);
-            }
+            if (state === STATE.OFF) return;
+            setState(STATE.IDLE);
+            if (callbackDespues) { callbackDespues(); return; }
+            _scheduleRelisten(500);
         };
-        this.synth.speak(u);
-    },
+        u.onerror = () => {
+            if (state === STATE.OFF) return;
+            setState(STATE.IDLE);
+            _scheduleRelisten(500);
+        };
+        synth.speak(u);
+    }
 
-    procesarInput(texto) {
-        this.listening = false;
+    /* ─── ACTIVAR / DESACTIVAR ───────────────────────── */
+    function activar() {
+        setState(STATE.IDLE);
+        document.getElementById('dara-user-btn')?.classList.add('active');
+        const perfil = getPerfil();
+        const nombre = perfil?.nombre?.split(' ')[0] || 'usuario';
+        _hablar(`Hola ${nombre}, estoy lista. Puedes pedirme ver tus equipos, reportar un problema, solicitar un equipo o revisar tus reportes.`);
+    }
 
-        if (this.conversacion) {
-            this.flujos[this.conversacion].call(this, texto);
-            return;
+    function desactivar() {
+        clearTimeout(_relistenTimer);
+        if (_recInstance) {
+            try { _recInstance.onresult = null; _recInstance.onend = null;
+                  _recInstance.onerror  = null; _recInstance.abort(); } catch(e) {}
+            _recInstance = null;
         }
+        synth.cancel();
+        _terminarFlujo();
+        setState(STATE.OFF);
+        document.getElementById('dara-user-btn')?.classList.remove('active');
+        _mostrarRespuesta('DARA desactivada.');
+        setTimeout(() => document.getElementById('dara-user-bubble')?.classList.remove('show'), 2500);
+    }
 
-        if (texto.includes('cancelar')) {
-            this.terminarFlujo();
-            this.hablar('Cancelado. En qué más puedo ayudarte.');
-            return;
-        }
-        if (texto.includes('desactivar') || texto.includes('cerrar') || texto.includes('salir') || texto.includes('apagar')) {
-            this.desactivar();
-            return;
-        }
-        if (texto.includes('mis equipos') || texto.includes('qué equipos tengo') || texto.includes('que equipos tengo') || texto.includes('equipos tengo')) {
-            this.consultarMisEquipos();
-            return;
-        }
-        if (texto.includes('estado') && (texto.includes('equipo') || texto.includes('mis'))) {
-            this.consultarEstadoEquipos();
-            return;
-        }
-        if (texto.includes('mis reportes') || texto.includes('reportes') || texto.includes('mis solicitudes')) {
-            this.consultarMisReportes();
-            return;
-        }
-        if (texto.includes('reportar') || texto.includes('reporte') || texto.includes('problema') || texto.includes('falla')) {
-            this.iniciarFlujo('reportarProblema');
-            return;
-        }
-        if (texto.includes('solicitar') || texto.includes('solicitud') || texto.includes('pedir equipo') || texto.includes('necesito equipo')) {
-            this.iniciarFlujo('solicitarEquipo');
-            return;
-        }
-        if (texto.includes('devolver') || texto.includes('devolución') || texto.includes('devolucion') || texto.includes('regresar equipo')) {
-            this.iniciarFlujo('devolverEquipo');
-            return;
-        }
-        if (texto.includes('mi setup') || texto.includes('inicio') || texto.includes('principal')) {
-            switchTab('setup');
-            this.hablar('Mostrando tu setup.');
-            return;
-        }
-        if (texto.includes('historial') || texto.includes('reportes') || texto.includes('mis reportes')) {
-            switchTab('historial');
-            this.hablar('Mostrando historial y reportes.');
-            return;
-        }
-        if (texto.includes('ayuda') || texto.includes('que puedes') || texto.includes('qué puedes')) {
-            this.hablar('Puedo mostrarte tus equipos, reportar un problema, solicitar un equipo, registrar una devolución o revisar tus reportes. ¿Qué necesitas?');
-            return;
-        }
+    /* ─── COMANDOS ───────────────────────────────────── */
+    function _procesarInput(texto) {
+        if (flujoActivo) { FLUJOS[flujoActivo](texto); return; }
 
-        this.hablar('No entendí ese comando. Di ayuda para ver qué puedo hacer.');
-    },
+        if (/cancelar/.test(texto))                                          { _terminarFlujo(); _hablar('Cancelado. ¿En qué más puedo ayudarte?'); return; }
+        if (/desactivar|cerrar|salir|apagar/.test(texto))                    { desactivar(); return; }
+        if (/mis equipos|qu[eé] equipos tengo|equipos tengo/.test(texto))    { _consultarMisEquipos(); return; }
+        if (/estado.*(equipo|mis)|(equipo|mis).*estado/.test(texto))         { _consultarEstadoEquipos(); return; }
+        if (/mis reportes|mis solicitudes/.test(texto))                      { _consultarMisReportes(); return; }
+        if (/reportar|problema|falla/.test(texto))                           { _iniciarFlujo('reportarProblema'); return; }
+        if (/solicitar|solicitud|pedir equipo|necesito equipo/.test(texto))  { _iniciarFlujo('solicitarEquipo'); return; }
+        if (/devolver|devoluci[oó]n|regresar equipo/.test(texto))            { _iniciarFlujo('devolverEquipo'); return; }
+        if (/mi setup|inicio|principal/.test(texto))                         { switchTab('setup'); _hablar('Mostrando tu setup.'); return; }
+        if (/historial/.test(texto))                                         { switchTab('historial'); _hablar('Mostrando tu historial.'); return; }
+        if (/ayuda|qu[eé] puedes/.test(texto)) {
+            _hablar('Puedo mostrarte tus equipos, reportar un problema, solicitar un equipo, registrar una devolución o revisar tus reportes. ¿Qué necesitas?');
+            return;
+        }
+        _hablar('No entendí ese comando. Di ayuda para ver qué puedo hacer.');
+    }
 
-    iniciarFlujo(nombre) {
-        this.conversacion = nombre;
-        this.paso = 0;
-        this.datos = {};
-        this.flujos[nombre].call(this, null);
-    },
+    function _iniciarFlujo(nombre) { flujoActivo = nombre; paso = 0; datos = {}; FLUJOS[nombre](null); }
+    function _terminarFlujo()      { flujoActivo = null; paso = 0; datos = {}; }
+    function _preguntar(texto)     { paso++; _hablar(texto); }
 
-    terminarFlujo() {
-        this.conversacion = null;
-        this.paso = 0;
-        this.datos = {};
-    },
-
-    flujos: {
+    /* ─── FLUJOS ─────────────────────────────────────── */
+    const FLUJOS = {
 
         reportarProblema(input) {
-            const pasos = [
-                () => {
-                    const perfil = getPerfil();
+            const TIPOS = {
+                'fallado':'Equipo Fallado', 'falla':'Equipo Fallado', 'no enciende':'Equipo Fallado',
+                'daño':'Daño Físico', 'físico':'Daño Físico', 'roto':'Daño Físico',
+                'software':'Problema con Paquetería', 'programa':'Problema con Paquetería',
+                'pérdida':'Pérdida', 'perdido':'Pérdida', 'otro':'Otro'
+            };
+            if (input === null) {
+                const equipos = getMisEquipos();
+                if (!equipos.length) { _terminarFlujo(); _hablar('No tienes equipos asignados para reportar.'); return; }
+                _hablar(`Tus equipos son: ${equipos.map(e => `${e.id}, ${e.nombre}`).join('. ')}. ¿Cuál tiene el problema?`);
+                paso = 1; return;
+            }
+            switch (paso) {
+                case 1: {
                     const equipos = getMisEquipos();
-                    if (!equipos.length) {
-                        this.terminarFlujo();
-                        this.hablar('No tienes equipos asignados para reportar.', false);
-                        return;
-                    }
-                    const lista = equipos.map(e => e.id + ' ' + e.nombre).join(', ');
-                    this.hablar('Tus equipos son: ' + lista + '. ¿Cuál tiene el problema?');
-                    this.paso = 1;
-                },
-                (input) => {
-                    const equipos = getMisEquipos();
-                    const eq = equipos.find(e => input.toUpperCase().includes(e.id) || input.toLowerCase().includes(e.nombre.toLowerCase()) || input.toLowerCase().includes(e.tipo.toLowerCase()));
-                    if (!eq) { this.hablar('No encontré ese equipo entre los tuyos. Di el identificador o el nombre.'); return; }
-                    this.datos.equipo = eq;
-                    this.hablar('Equipo ' + eq.id + ' seleccionado. ¿Qué tipo de problema es? Puedes decir equipo fallado, daño físico, problema con software u otro.');
-                    this.paso++;
-                },
-                (input) => {
-                    const tipos = {
-                        'fallado': 'Equipo Fallado', 'falla': 'Equipo Fallado', 'no enciende': 'Equipo Fallado',
-                        'daño': 'Daño Físico', 'físico': 'Daño Físico', 'roto': 'Daño Físico',
-                        'software': 'Problema con Paquetería', 'programa': 'Problema con Paquetería',
-                        'pérdida': 'Pérdida', 'perdido': 'Pérdida',
-                        'otro': 'Otro'
-                    };
-                    const key = Object.keys(tipos).find(t => input.includes(t));
-                    this.datos.tipo = key ? tipos[key] : 'Otro';
-                    this.hablar('Tipo registrado: ' + this.datos.tipo + '. Describe brevemente el problema.');
-                    this.paso++;
-                },
-                (input) => {
-                    this.datos.descripcion = input.trim();
-                    this.hablar('Voy a reportar: ' + this.datos.tipo + ' en ' + this.datos.equipo.id + '. ' + this.datos.descripcion + '. ¿Confirmas?');
-                    this.paso++;
-                },
-                (input) => {
-                    if (input.includes('sí') || input.includes('si') || input.includes('confirmo') || input.includes('correcto')) {
+                    const eq = equipos.find(e =>
+                        input.toUpperCase().includes(e.id) ||
+                        input.toLowerCase().includes(e.nombre.toLowerCase()) ||
+                        input.toLowerCase().includes(e.tipo.toLowerCase()));
+                    if (!eq) { _hablar('No encontré ese equipo entre los tuyos. Di el identificador o el nombre.'); return; }
+                    datos.equipo = eq;
+                    _preguntar(`Equipo ${eq.id} seleccionado. ¿Qué tipo de problema es? Equipo fallado, daño físico, problema de software u otro.`); break;
+                }
+                case 2: {
+                    const key = Object.keys(TIPOS).find(t => input.includes(t));
+                    datos.tipo = key ? TIPOS[key] : 'Otro';
+                    _preguntar(`Tipo: ${datos.tipo}. Describe brevemente el problema.`); break;
+                }
+                case 3:
+                    datos.descripcion = input.trim();
+                    _preguntar(`Voy a reportar: ${datos.tipo} en ${datos.equipo.id}. ${datos.descripcion}. ¿Confirmas?`); break;
+                case 4: {
+                    if (/s[ií]|confirmo|correcto/.test(input)) {
                         const perfil = getPerfil();
-                        const eq = this.datos.equipo;
-                        const reports = JSON.parse(localStorage.getItem('warehouse-reports') || '[]');
-                        reports.push({
-                            id: 'RP-' + Date.now(),
-                            equipmentId: eq.id,
-                            type: this.datos.tipo,
-                            description: this.datos.descripcion,
-                            reporter: perfil.nombre,
-                            priority: 'Media',
-                            date: new Date().toISOString().split('T')[0],
-                            status: 'Pendiente'
-                        });
-                        localStorage.setItem('warehouse-reports', JSON.stringify(reports));
-
-                        dbBase.eventos.push({
-                            id: 'EVT-U' + Date.now(),
-                            equipoId: eq.id,
-                            tipo: 'envio_mantenimiento',
-                            fecha: new Date().toISOString().split('T')[0],
-                            usuario: perfil.nombre,
-                            area: 'Taller',
-                            notas: this.datos.tipo + ': ' + this.datos.descripcion.substring(0, 50)
-                        });
+                        const reps   = JSON.parse(localStorage.getItem('warehouse-reports') || '[]');
+                        reps.push({ id:'RP-'+Date.now(), equipmentId:datos.equipo.id, type:datos.tipo,
+                            description:datos.descripcion, reporter:perfil.nombre,
+                            priority:'Media', date:new Date().toISOString().split('T')[0], status:'Pendiente' });
+                        localStorage.setItem('warehouse-reports', JSON.stringify(reps));
+                        dbBase.eventos.push({ id:'EVT-U'+Date.now(), equipoId:datos.equipo.id,
+                            tipo:'envio_mantenimiento', fecha:new Date().toISOString().split('T')[0],
+                            usuario:perfil.nombre, area:'Taller',
+                            notas:`${datos.tipo}: ${datos.descripcion.substring(0,50)}` });
                         saveDB();
                         if (typeof renderUserReports === 'function') renderUserReports();
-                        if (typeof renderTimeline === 'function') renderTimeline();
+                        if (typeof renderTimeline    === 'function') renderTimeline();
                         switchTab('historial');
-                        this.terminarFlujo();
-                        this.hablar('Reporte enviado al administrador. Te notificaremos pronto.', false);
+                        _terminarFlujo();
+                        _hablar('Reporte enviado al administrador. Te notificaremos en cuanto haya una actualización.');
                     } else {
-                        this.terminarFlujo();
-                        this.hablar('Reporte cancelado.', false);
+                        _terminarFlujo();
+                        _hablar('Reporte cancelado. ¿Necesitas algo más?');
                     }
+                    break;
                 }
-            ];
-            if (input === null) { pasos[0].call(this); return; }
-            if (this.paso < pasos.length) pasos[this.paso].call(this, input);
+            }
         },
 
         solicitarEquipo(input) {
-            const pasos = [
-                () => {
-                    this.hablar('Vamos a levantar tu solicitud. ¿Qué tipo de equipo necesitas? Laptop, Monitor, Mouse, Teclado, CPU u otro.');
-                    this.paso = 1;
-                },
-                (input) => {
-                    const tipos = {
-                        'laptop': 'Laptop', 'monitor': 'Monitor', 'mouse': 'Mouse',
-                        'teclado': 'Teclado', 'cpu': 'CPU', 'audifonos': 'Audifonos',
-                        'tablet': 'Tablet', 'impresora': 'Impresora', 'otro': 'Otro'
-                    };
-                    const key = Object.keys(tipos).find(t => input.includes(t));
-                    this.datos.tipo = key ? tipos[key] : this.capitalizar(input.trim());
-                    this.hablar('Tipo: ' + this.datos.tipo + '. ¿Cuál es el motivo de la solicitud?');
-                    this.paso++;
-                },
-                (input) => {
-                    this.datos.motivo = input.trim();
-                    this.hablar('Motivo registrado. ¿Por cuánto tiempo lo necesitas? Di por ejemplo tres dias, una semana o indefinido.');
-                    this.paso++;
-                },
-                (input) => {
-                    this.datos.duracion = input.trim();
-                    this.hablar('Solicitud de ' + this.datos.tipo + ' por ' + this.datos.duracion + '. Motivo: ' + this.datos.motivo + '. ¿Confirmas?');
-                    this.paso++;
-                },
-                (input) => {
-                    if (input.includes('sí') || input.includes('si') || input.includes('confirmo') || input.includes('correcto')) {
+            const TIPOS = { laptop:'Laptop', monitor:'Monitor', mouse:'Mouse', teclado:'Teclado',
+                            cpu:'CPU', audifonos:'Audífonos', tablet:'Tablet',
+                            impresora:'Impresora', otro:'Otro' };
+            if (input === null) {
+                _hablar('Vamos a levantar tu solicitud. ¿Qué tipo de equipo necesitas? Laptop, Monitor, Mouse, Teclado, CPU u otro.');
+                paso = 1; return;
+            }
+            switch (paso) {
+                case 1: {
+                    const key = Object.keys(TIPOS).find(t => input.includes(t));
+                    datos.tipo = key ? TIPOS[key] : _cap(input.trim());
+                    _preguntar(`Tipo: ${datos.tipo}. ¿Cuál es el motivo de la solicitud?`); break;
+                }
+                case 2:
+                    datos.motivo = input.trim();
+                    _preguntar('Motivo registrado. ¿Por cuánto tiempo lo necesitas? Di por ejemplo tres días, una semana o indefinido.'); break;
+                case 3:
+                    datos.duracion = input.trim();
+                    _preguntar(`Solicitud de ${datos.tipo} por ${datos.duracion}. Motivo: ${datos.motivo}. ¿Confirmas?`); break;
+                case 4: {
+                    if (/s[ií]|confirmo|correcto/.test(input)) {
                         const perfil = getPerfil();
-                        const desc = 'Tipo: ' + this.datos.tipo + ' | Motivo: ' + this.datos.motivo + ' | Duracion: ' + this.datos.duracion;
-                        const reports = JSON.parse(localStorage.getItem('warehouse-reports') || '[]');
-                        reports.push({
-                            id: 'RP-' + Date.now(),
-                            equipmentId: 'PEDIDO',
-                            type: 'Solicitud de prestamo',
-                            description: desc,
-                            reporter: perfil.nombre,
-                            priority: 'Media',
-                            date: new Date().toISOString().split('T')[0],
-                            status: 'Pendiente'
-                        });
-                        localStorage.setItem('warehouse-reports', JSON.stringify(reports));
-
-                        dbBase.eventos.push({
-                            id: 'EVT-U' + Date.now(),
-                            equipoId: 'PEDIDO',
-                            tipo: 'solicitud_prestamo',
-                            fecha: new Date().toISOString().split('T')[0],
-                            usuario: perfil.nombre,
-                            area: perfil.area,
-                            notas: desc.substring(0, 80)
-                        });
+                        const desc   = `Tipo: ${datos.tipo} | Motivo: ${datos.motivo} | Duración: ${datos.duracion}`;
+                        const reps   = JSON.parse(localStorage.getItem('warehouse-reports') || '[]');
+                        reps.push({ id:'RP-'+Date.now(), equipmentId:'PEDIDO',
+                            type:'Solicitud de prestamo', description:desc,
+                            reporter:perfil.nombre, priority:'Media',
+                            date:new Date().toISOString().split('T')[0], status:'Pendiente' });
+                        localStorage.setItem('warehouse-reports', JSON.stringify(reps));
+                        dbBase.eventos.push({ id:'EVT-U'+Date.now(), equipoId:'PEDIDO',
+                            tipo:'solicitud_prestamo', fecha:new Date().toISOString().split('T')[0],
+                            usuario:perfil.nombre, area:perfil.area, notas:desc.substring(0,80) });
                         saveDB();
-                        if (typeof renderTimeline === 'function') renderTimeline();
+                        if (typeof renderTimeline    === 'function') renderTimeline();
                         if (typeof renderUserReports === 'function') renderUserReports();
                         switchTab('historial');
-                        this.terminarFlujo();
-                        this.hablar('Solicitud enviada al administrador. Te avisaremos cuando sea aprobada.', false);
+                        _terminarFlujo();
+                        _hablar('Solicitud enviada al administrador. Te avisaremos cuando sea aprobada. ¿Algo más?');
                     } else {
-                        this.terminarFlujo();
-                        this.hablar('Solicitud cancelada.', false);
+                        _terminarFlujo();
+                        _hablar('Solicitud cancelada. ¿Puedo ayudarte en algo más?');
                     }
+                    break;
                 }
-            ];
-            if (input === null) { pasos[0].call(this); return; }
-            if (this.paso < pasos.length) pasos[this.paso].call(this, input);
+            }
         },
 
         devolverEquipo(input) {
-            const pasos = [
-                () => {
+            const CONDS = { excelente:'Excelente', bueno:'Bueno', regular:'Regular', malo:'Malo' };
+            if (input === null) {
+                const equipos = getMisEquipos();
+                if (!equipos.length) { _terminarFlujo(); _hablar('No tienes equipos asignados para devolver.'); return; }
+                _hablar(`Tus equipos son: ${equipos.map(e => `${e.id}, ${e.nombre}`).join('. ')}. ¿Cuál deseas devolver?`);
+                paso = 1; return;
+            }
+            switch (paso) {
+                case 1: {
                     const equipos = getMisEquipos();
-                    if (!equipos.length) {
-                        this.terminarFlujo();
-                        this.hablar('No tienes equipos asignados para devolver.', false);
-                        return;
-                    }
-                    const lista = equipos.map(e => e.id + ' ' + e.nombre).join(', ');
-                    this.hablar('Tus equipos son: ' + lista + '. ¿Cuál deseas devolver?');
-                    this.paso = 1;
-                },
-                (input) => {
-                    const equipos = getMisEquipos();
-                    const eq = equipos.find(e => input.toUpperCase().includes(e.id) || input.toLowerCase().includes(e.nombre.toLowerCase()));
-                    if (!eq) { this.hablar('No encontré ese equipo. Di el identificador o el nombre.'); return; }
-                    this.datos.equipo = eq;
-                    this.hablar('Equipo ' + eq.id + ' seleccionado. ¿En qué condición lo devuelves? Excelente, bueno, regular o malo.');
-                    this.paso++;
-                },
-                (input) => {
-                    const condiciones = { 'excelente': 'Excelente', 'bueno': 'Bueno', 'regular': 'Regular', 'malo': 'Malo' };
-                    const key = Object.keys(condiciones).find(c => input.includes(c));
-                    this.datos.condicion = key ? condiciones[key] : 'Bueno';
-                    this.hablar('Devolución de ' + this.datos.equipo.id + ' en condición ' + this.datos.condicion + '. ¿Confirmas?');
-                    this.paso++;
-                },
-                (input) => {
-                    if (input.includes('sí') || input.includes('si') || input.includes('confirmo') || input.includes('correcto')) {
+                    const eq = equipos.find(e =>
+                        input.toUpperCase().includes(e.id) ||
+                        input.toLowerCase().includes(e.nombre.toLowerCase()));
+                    if (!eq) { _hablar('No encontré ese equipo. Di el identificador o el nombre.'); return; }
+                    datos.equipo = eq;
+                    _preguntar(`Equipo ${eq.id} seleccionado. ¿En qué condición lo devuelves? Excelente, bueno, regular o malo.`); break;
+                }
+                case 2: {
+                    const key = Object.keys(CONDS).find(c => input.includes(c));
+                    datos.condicion = key ? CONDS[key] : 'Bueno';
+                    _preguntar(`Devolución de ${datos.equipo.id} en condición ${datos.condicion}. ¿Confirmas?`); break;
+                }
+                case 3: {
+                    if (/s[ií]|confirmo|correcto/.test(input)) {
                         const perfil = getPerfil();
-                        const eq = this.datos.equipo;
-                        const hoy = new Date().toISOString().split('T')[0];
-
-                        dbBase.eventos.push({
-                            id: 'EVT-U' + Date.now(),
-                            equipoId: eq.id,
-                            tipo: 'devolucion',
-                            fecha: hoy,
-                            usuario: perfil.nombre,
-                            area: 'Almacen',
-                            notas: 'Devuelto en condicion: ' + this.datos.condicion + ' via DARA'
-                        });
+                        const hoy    = new Date().toISOString().split('T')[0];
+                        dbBase.eventos.push({ id:'EVT-U'+Date.now(), equipoId:datos.equipo.id,
+                            tipo:'devolucion', fecha:hoy, usuario:perfil.nombre, area:'Almacen',
+                            notas:`Devuelto en condición: ${datos.condicion} vía DARA` });
                         saveDB();
-
-                        const reports = JSON.parse(localStorage.getItem('warehouse-reports') || '[]');
-                        reports.push({
-                            id: 'RP-' + Date.now(),
-                            equipmentId: eq.id,
-                            type: 'Devolucion',
-                            description: 'Devuelto en condicion ' + this.datos.condicion,
-                            reporter: perfil.nombre,
-                            priority: 'Baja',
-                            date: hoy,
-                            status: 'Resuelto'
-                        });
-                        localStorage.setItem('warehouse-reports', JSON.stringify(reports));
-
-                        if (typeof renderSetup === 'function') renderSetup();
+                        const reps = JSON.parse(localStorage.getItem('warehouse-reports') || '[]');
+                        reps.push({ id:'RP-'+Date.now(), equipmentId:datos.equipo.id,
+                            type:'Devolucion', description:`Devuelto en condición ${datos.condicion}`,
+                            reporter:perfil.nombre, priority:'Baja', date:hoy, status:'Resuelto' });
+                        localStorage.setItem('warehouse-reports', JSON.stringify(reps));
+                        if (typeof renderSetup    === 'function') renderSetup();
                         if (typeof renderTimeline === 'function') renderTimeline();
                         switchTab('historial');
-                        this.terminarFlujo();
-                        this.hablar('Devolución de ' + eq.id + ' registrada exitosamente.', false);
+                        _terminarFlujo();
+                        _hablar(`Devolución de ${datos.equipo.id} registrada exitosamente. ¿Puedo ayudarte en algo más?`);
                     } else {
-                        this.terminarFlujo();
-                        this.hablar('Devolución cancelada.', false);
+                        _terminarFlujo();
+                        _hablar('Devolución cancelada. ¿Necesitas algo más?');
                     }
+                    break;
                 }
-            ];
-            if (input === null) { pasos[0].call(this); return; }
-            if (this.paso < pasos.length) pasos[this.paso].call(this, input);
+            }
         }
-    },
+    };
 
-    consultarMisEquipos() {
+    function _consultarMisEquipos() {
         const equipos = getMisEquipos();
-        if (!equipos.length) {
-            this.hablar('No tienes equipos asignados en este momento.', false);
-            return;
-        }
-        const lista = equipos.map(e => e.nombre + ' ' + e.id).join(', ');
-        this.hablar('Tienes ' + equipos.length + ' equipo' + (equipos.length > 1 ? 's' : '') + ' asignado' + (equipos.length > 1 ? 's' : '') + ': ' + lista, false);
-    },
+        if (!equipos.length) { _hablar('No tienes equipos asignados en este momento.'); return; }
+        const lista = equipos.map(e => `${e.nombre} ${e.id}`).join(', ');
+        _hablar(`Tienes ${equipos.length} equipo${equipos.length !== 1 ? 's' : ''} asignado${equipos.length !== 1 ? 's' : ''}: ${lista}.`);
+    }
 
-    consultarEstadoEquipos() {
+    function _consultarEstadoEquipos() {
         const equipos = getMisEquipos();
-        if (!equipos.length) {
-            this.hablar('No tienes equipos asignados.', false);
-            return;
-        }
-        const detalle = equipos.map(e => {
-            const info = getEstadoUser(e.id);
-            return e.id + ' en estado ' + info.estado;
-        }).join('. ');
-        this.hablar(detalle, false);
-    },
+        if (!equipos.length) { _hablar('No tienes equipos asignados.'); return; }
+        _hablar(equipos.map(e => `${e.id} en estado ${getEstadoUser(e.id).estado}`).join('. ') + '.');
+    }
 
-    consultarMisReportes() {
+    function _consultarMisReportes() {
         const perfil = getPerfil();
-        const mis = JSON.parse(localStorage.getItem('warehouse-reports') || '[]')
-            .filter(r => r.reporter === perfil.nombre);
-        if (!mis.length) {
-            this.hablar('No tienes reportes registrados.', false);
-            return;
-        }
-        const pendientes = mis.filter(r => r.status === 'Pendiente').length;
-        const aprobados = mis.filter(r => r.status === 'Aprobado').length;
-        const resueltos = mis.filter(r => r.status === 'Resuelto' || r.status === 'Rechazado').length;
-        let resp = 'Tienes ' + mis.length + ' reporte' + (mis.length > 1 ? 's' : '') + ' en total.';
-        if (pendientes) resp += ' ' + pendientes + ' pendiente' + (pendientes > 1 ? 's' : '') + '.';
-        if (aprobados) resp += ' ' + aprobados + ' aprobado' + (aprobados > 1 ? 's' : '') + '.';
-        if (resueltos) resp += ' ' + resueltos + ' resuelto' + (resueltos > 1 ? 's' : '') + '.';
-        this.hablar(resp, false);
-    },
+        const todos  = JSON.parse(localStorage.getItem('warehouse-reports') || '[]').filter(r => r.reporter === perfil.nombre);
+        if (!todos.length) { _hablar('No tienes reportes registrados.'); return; }
+        const p = todos.filter(r => r.status === 'Pendiente').length;
+        const a = todos.filter(r => r.status === 'Aprobado').length;
+        const re= todos.filter(r => r.status === 'Resuelto' || r.status === 'Rechazado').length;
+        let r = `Tienes ${todos.length} reporte${todos.length !== 1 ? 's' : ''} en total.`;
+        if (p)  r += ` ${p} pendiente${p  !== 1 ? 's' : ''}.`;
+        if (a)  r += ` ${a} aprobado${a   !== 1 ? 's' : ''}.`;
+        if (re) r += ` ${re} resuelto${re !== 1 ? 's' : ''}.`;
+        _hablar(r);
+    }
 
-    renderUI() {
+    function _cap(str) { return str ? str.charAt(0).toUpperCase() + str.slice(1) : str; }
+
+    /* ─── UI ─────────────────────────────────────────── */
+    function _renderUI() {
         const el = document.createElement('div');
         el.id = 'dara-user-widget';
         el.innerHTML = `
         <style>
             #dara-user-widget {
-                position: fixed;
-                bottom: 28px;
-                right: 28px;
-                z-index: 9999;
-                display: flex;
-                flex-direction: column;
-                align-items: flex-end;
-                gap: 8px;
-                font-family: 'Inter', sans-serif;
+                position:fixed; bottom:28px; right:28px; z-index:9999;
+                display:flex; flex-direction:column; align-items:flex-end; gap:10px;
+                font-family:'Inter',sans-serif;
             }
             #dara-user-transcript {
-                background: #EFF6FF;
-                border: 1px solid #BFDBFE;
-                border-radius: 12px 12px 12px 4px;
-                padding: 7px 12px;
-                max-width: 260px;
-                font-size: 11px;
-                color: #1D4ED8;
-                font-style: italic;
-                display: none;
-                animation: dara-fadein .2s ease;
+                background:#EFF6FF; border:1px solid #BFDBFE;
+                border-radius:12px 12px 12px 4px; padding:7px 12px;
+                max-width:270px; font-size:11px; color:#1D4ED8; font-style:italic;
+                opacity:0; transform:translateY(4px); transition:opacity .2s,transform .2s;
+                pointer-events:none;
             }
-            #dara-user-transcript.show { display: block; }
+            #dara-user-transcript.show { opacity:1; transform:none; }
             #dara-user-bubble {
-                background: #fff;
-                border: 1px solid #E2E8F0;
-                border-radius: 14px 14px 4px 14px;
-                padding: 11px 14px;
-                max-width: 260px;
-                font-size: 12px;
-                color: #334155;
-                box-shadow: 0 6px 20px rgba(0,31,63,.1);
-                display: none;
-                line-height: 1.5;
-                animation: dara-fadein .2s ease;
+                background:#fff; border:1px solid #E2E8F0;
+                border-radius:14px 14px 4px 14px; padding:12px 15px;
+                max-width:270px; font-size:12.5px; color:#334155;
+                box-shadow:0 8px 24px rgba(0,31,63,.12); line-height:1.55;
+                opacity:0; transform:translateY(4px); transition:opacity .25s,transform .25s;
+                pointer-events:none;
             }
-            #dara-user-bubble.show { display: block; }
+            #dara-user-bubble.show { opacity:1; transform:none; }
             #dara-user-bubble-label {
-                font-size: 9px;
-                font-weight: 800;
-                color: #001f3f;
-                letter-spacing: 1.5px;
-                margin-bottom: 4px;
-                display: block;
+                font-size:9px; font-weight:800; color:#001f3f;
+                letter-spacing:1.5px; margin-bottom:5px; display:block;
             }
             #dara-user-btn {
-                width: 56px;
-                height: 56px;
-                border-radius: 50%;
-                background: #001f3f;
-                border: 3px solid rgba(255,255,255,.15);
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                box-shadow: 0 4px 16px rgba(0,31,63,.4);
-                transition: all .25s;
-                position: relative;
-                outline: none;
+                width:58px; height:58px; border-radius:50%;
+                background:#001f3f; border:3px solid rgba(255,255,255,.15);
+                cursor:pointer; display:flex; align-items:center; justify-content:center;
+                box-shadow:0 4px 18px rgba(0,31,63,.45); transition:transform .2s,box-shadow .2s;
+                position:relative; outline:none; padding:0;
             }
-            #dara-user-btn:hover { transform: scale(1.08); }
-            #dara-user-btn.active { border-color: rgba(255,255,255,.4); }
-            #dara-user-btn.listening { background: #DC2626; animation: dara-pulse 1s ease-in-out infinite; }
-            #dara-user-btn.speaking { background: #059669; animation: dara-pulse 1.4s ease-in-out infinite; }
+            #dara-user-btn:hover { transform:scale(1.07); }
+            #dara-user-btn.active    { border-color:rgba(255,255,255,.35); }
+            #dara-user-btn.listening { background:#DC2626; }
+            #dara-user-btn.speaking  { background:#059669; }
             #dara-user-name {
-                position: absolute;
-                top: -9px;
-                left: 50%;
-                transform: translateX(-50%);
-                background: #001f3f;
-                color: #fff;
-                font-size: 8px;
-                font-weight: 800;
-                letter-spacing: 2px;
-                padding: 2px 7px;
-                border-radius: 5px;
-                white-space: nowrap;
-                border: 1px solid rgba(255,255,255,.2);
+                position:absolute; top:-10px; left:50%; transform:translateX(-50%);
+                background:#001f3f; color:#fff; font-size:8px; font-weight:800;
+                letter-spacing:2px; padding:2px 8px; border-radius:5px;
+                white-space:nowrap; border:1px solid rgba(255,255,255,.2);
             }
-            #dara-user-icon { font-size: 20px; line-height: 1; }
-            #dara-user-waves {
-                position: absolute;
-                inset: -4px;
-                border-radius: 50%;
-                border: 2px solid rgba(255,255,255,.3);
-                display: none;
-                animation: dara-wave 1.2s ease-out infinite;
+            #dara-user-icon { font-size:22px; line-height:1; user-select:none; }
+            #dara-user-waves, #dara-user-pulse-ring {
+                position:absolute; inset:-5px; border-radius:50%;
+                border:2px solid rgba(255,255,255,.35); opacity:0;
+                animation:du-wave 1.3s ease-out infinite;
             }
-            #dara-user-btn.listening #dara-user-waves,
-            #dara-user-btn.speaking #dara-user-waves { display: block; }
-            @keyframes dara-pulse {
-                0%,100% { box-shadow: 0 4px 16px rgba(0,31,63,.4); }
-                50% { box-shadow: 0 4px 28px rgba(0,31,63,.6), 0 0 0 6px rgba(0,31,63,.08); }
-            }
-            @keyframes dara-wave {
-                0% { transform: scale(1); opacity: .6; }
-                100% { transform: scale(1.5); opacity: 0; }
-            }
-            @keyframes dara-fadein {
-                from { opacity: 0; transform: translateY(4px); }
-                to { opacity: 1; transform: none; }
+            #dara-user-pulse-ring { animation-delay:.45s; }
+            #dara-user-btn.listening #dara-user-waves, #dara-user-btn.speaking #dara-user-waves,
+            #dara-user-btn.listening #dara-user-pulse-ring, #dara-user-btn.speaking #dara-user-pulse-ring { opacity:1; }
+            @keyframes du-wave {
+                0%   { transform:scale(1); opacity:.55; }
+                100% { transform:scale(1.65); opacity:0; }
             }
         </style>
-
         <div id="dara-user-transcript"></div>
         <div id="dara-user-bubble">
-            <span id="dara-user-bubble-label">DARA</span>
+            <span id="dara-user-bubble-label">DARA · COLABORADOR</span>
             <span id="dara-user-text">Presiona para activarme</span>
         </div>
         <button id="dara-user-btn" title="Activar DARA">
             <div id="dara-user-name">DARA</div>
             <div id="dara-user-waves"></div>
+            <div id="dara-user-pulse-ring"></div>
             <span id="dara-user-icon">🤖</span>
         </button>`;
-
         document.body.appendChild(el);
+        document.getElementById('dara-user-btn').onclick = () =>
+            state === STATE.OFF ? activar() : desactivar();
+        setTimeout(() => _mostrarRespuesta('Presiona para activarme'), 1500);
+    }
 
-        document.getElementById('dara-user-btn').onclick = () => {
-            if (this.active) { this.desactivar(); } else { this.activar(); }
-        };
-
-        setTimeout(() => this.mostrarRespuesta('Presiona para activarme'), 1500);
-    },
-
-    setEstado(estado) {
-        const btn = document.getElementById('dara-user-btn');
+    function _renderEstado(s) {
+        const btn  = document.getElementById('dara-user-btn');
         const icon = document.getElementById('dara-user-icon');
         if (!btn) return;
         btn.className = '';
-        if (estado === 'listening') { btn.classList.add('listening'); icon.textContent = '👂'; }
-        else if (estado === 'speaking') { btn.classList.add('speaking'); icon.textContent = '💬'; }
-        else if (estado === 'off') { icon.textContent = '🤖'; }
-        else { if (this.active) btn.classList.add('active'); icon.textContent = '🎙️'; }
-    },
+        switch (s) {
+            case STATE.LISTENING: btn.classList.add('listening'); icon.textContent = '👂'; break;
+            case STATE.SPEAKING:  btn.classList.add('speaking');  icon.textContent = '💬'; break;
+            case STATE.IDLE:      btn.classList.add('active');    icon.textContent = '🎙️'; break;
+            case STATE.OFF:                                        icon.textContent = '🤖'; break;
+        }
+    }
 
-    mostrarRespuesta(texto) {
+    function _mostrarRespuesta(texto) {
         const bubble = document.getElementById('dara-user-bubble');
-        const t = document.getElementById('dara-user-text');
+        const t      = document.getElementById('dara-user-text');
         if (!bubble || !t) return;
         t.textContent = texto;
         bubble.classList.add('show');
-        clearTimeout(this._bubbleTimer);
-        this._bubbleTimer = setTimeout(() => bubble.classList.remove('show'), 7000);
-    },
+        clearTimeout(_bubbleTimer);
+        _bubbleTimer = setTimeout(() => bubble.classList.remove('show'), 7500);
+    }
 
-    mostrarTranscripcion(texto) {
+    function _mostrarTranscripcion(texto) {
         const tr = document.getElementById('dara-user-transcript');
         if (!tr) return;
-        tr.textContent = '"' + texto + '"';
+        tr.textContent = `"${texto}"`;
         tr.classList.add('show');
-        clearTimeout(this._trTimer);
-        this._trTimer = setTimeout(() => tr.classList.remove('show'), 3500);
-    },
-
-    capitalizar(str) {
-        return str.charAt(0).toUpperCase() + str.slice(1);
+        clearTimeout(_trTimer);
+        _trTimer = setTimeout(() => tr.classList.remove('show'), 3500);
     }
-};
 
-if (document.readyState === 'loading') {
+    return { init, activar, desactivar };
+
+})();
+
+if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', () => DARA_USER.init());
-} else {
+else
     DARA_USER.init();
-}
