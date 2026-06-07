@@ -183,17 +183,17 @@ const DARA = (() => {
         if (/desactivar|cerrar|salir|apagar/.test(texto))               { desactivar(); return; }
         if (/dashboard|inicio/.test(texto))                              { showSection('dashboard'); _hablar('Mostrando el dashboard.'); return; }
         if (/inventario|monitoreo/.test(texto))                         { showSection('monitoring'); _hablar('Mostrando inventario.'); return; }
-        if (/pr[eé]stamos?\b(?!.*activo)/.test(texto))                  { showSection('loans'); _hablar('Mostrando préstamos.'); return; }
+        if (/equipate|equipa te|pr[eé]stamos?\b(?!.*activo)/.test(texto)){ showSection('loans'); _hablar('Mostrando EquipaTE.'); return; }
         if (/historial/.test(texto))                                     { showSection('history'); _hablar('Mostrando historial.'); return; }
         if (/reportes?/.test(texto))                                     { showSection('reports'); _hablar('Mostrando reportes.'); return; }
         if (/notificaciones/.test(texto))                                { showSection('alexa'); _hablar('Mostrando notificaciones.'); return; }
         if (/registrar|nuevo equipo|alta/.test(texto))                   { _iniciarFlujo('registrarEquipo'); return; }
         if (/asignar/.test(texto))                                       { _iniciarFlujo('asignarEquipo'); return; }
         if (/disponible/.test(texto))                                    { _iniciarFlujo('consultarDisponibles'); return; }
-        if (/pr[eé]stamos? activos?|en campo/.test(texto))              { _consultarPrestamosActivos(); return; }
+        if (/asignaciones? activas?|en campo/.test(texto))               { _consultarPrestamosActivos(); return; }
         if (/pendientes?|reporte pendiente/.test(texto))                 { _consultarReportesPendientes(); return; }
         if (/ayuda|qu[eé] puedes/.test(texto)) {
-            _hablar('Puedo registrar equipos, asignar equipos, consultar disponibles, ver préstamos activos, reportes pendientes y navegar entre secciones. ¿Qué necesitas?');
+            _hablar('Puedo registrar equipos, asignar equipos, consultar disponibles, ver asignaciones activas, reportes pendientes y navegar entre secciones. ¿Qué necesitas?');
             return;
         }
         _hablar('No entendí ese comando. Di ayuda para ver qué puedo hacer.');
@@ -277,34 +277,34 @@ const DARA = (() => {
                     if (!eq) { _hablar('No encontré ese equipo. Di el identificador, por ejemplo LAP-001.'); return; }
                     if (getEstado(eq.id).estado !== 'Disponible') { _hablar('Ese equipo no está disponible actualmente.'); return; }
                     datos.equipo = eq;
-                    _preguntar(`Equipo ${eq.id} seleccionado. ¿A qué colaborador lo asignamos?`); break;
+                    _preguntar(`Equipo ${eq.id} seleccionado. ¿A qué colaborador se lo asignamos?`); break;
                 }
                 case 2:
-                    datos.empleado = _cap(input.trim());
-                    _preguntar(`Colaborador ${datos.empleado}. ¿En qué área trabaja?`); break;
+                    datos.colaborador = _cap(input.trim());
+                    _preguntar(`Colaborador ${datos.colaborador}. ¿A qué célula pertenece?`); break;
                 case 3:
-                    datos.area = _cap(input.trim());
-                    _preguntar(`Asignando ${datos.equipo.id} a ${datos.empleado} del área ${datos.area}. ¿Confirmas?`); break;
+                    datos.celula = _cap(input.trim());
+                    _preguntar(`Asignando ${datos.equipo.id} a ${datos.colaborador} de la célula ${datos.celula}. ¿Confirmas?`); break;
                 case 4: {
                     if (/s[ií]|confirmo|correcto/.test(input)) {
                         const hoy = new Date().toISOString().split('T')[0];
                         dbBase.eventos.push({ id:nextId('EVT',dbBase.eventos), equipoId:datos.equipo.id,
-                            tipo:'asignacion', fecha:hoy, usuario:datos.empleado, area:datos.area,
+                            tipo:'asignacion', fecha:hoy, usuario:datos.colaborador, area:datos.celula,
                             notas:'Asignado por DARA' });
                         saveDB();
                         loans.push({ id:'LN-'+Date.now(), equipmentId:datos.equipo.id,
-                            employee:datos.empleado, warehousePerson:'DARA', conditionOut:'Bueno',
+                            employee:datos.colaborador, warehousePerson:'DARA', conditionOut:'Bueno',
                             conditionIn:'', durationValue:null, durationUnit:'indefinido',
                             startDate:hoy, returnDate:'', status:'Activo',
-                            notes:'Asignado por voz', area:datos.area });
+                            notes:'Asignado por voz', area:datos.celula });
                         notifications.unshift({ id:'NT-'+Date.now(), type:'Préstamo',
-                            message:`Asignación por DARA: ${datos.equipo.id} a ${datos.empleado}`,
+                            message:`Asignación por DARA: ${datos.equipo.id} a ${datos.colaborador}`,
                             date:new Date().toLocaleString('es-MX'), read:false });
                         saveData();
                         if (typeof renderTables  === 'function') renderTables();
                         if (typeof syncDashboard === 'function') syncDashboard();
                         _terminarFlujo();
-                        _hablar(`${datos.equipo.id} asignado a ${datos.empleado} exitosamente. ¿Algo más?`);
+                        _hablar(`${datos.equipo.id} asignado a ${datos.colaborador} de la célula ${datos.celula} exitosamente. ¿Algo más?`);
                     } else {
                         _terminarFlujo();
                         _hablar('Asignación cancelada. ¿En qué más puedo ayudarte?');
@@ -341,9 +341,9 @@ const DARA = (() => {
 
     function _consultarPrestamosActivos() {
         const activos = loans.filter(l => l.status === 'Activo');
-        if (!activos.length) { _hablar('No hay préstamos activos en este momento.'); return; }
-        const lista = activos.slice(0,4).map(l => `${l.equipmentId} con ${l.employee}`).join(', ');
-        _hablar(`Hay ${activos.length} préstamo${activos.length !== 1 ? 's' : ''} activo${activos.length !== 1 ? 's' : ''}: ${lista}.`);
+        if (!activos.length) { _hablar('No hay asignaciones activas en este momento.'); return; }
+        const lista = activos.slice(0,4).map(l => `${l.equipmentId} asignado a ${l.employee}${l.area ? ' de la célula ' + l.area : ''}`).join('. ');
+        _hablar(`Hay ${activos.length} asignación${activos.length !== 1 ? 'es' : ''} activa${activos.length !== 1 ? 's' : ''}: ${lista}.`);
     }
 
     function _consultarReportesPendientes() {
